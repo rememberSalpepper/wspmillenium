@@ -40,6 +40,10 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
+      - name: Test SSH connection
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "echo SSH_OK"
+
       - name: Ensure deploy path exists
         run: |
           ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
@@ -48,6 +52,7 @@ jobs:
       - name: Sync repo to VPS
         run: |
           rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_ed25519 -p $VPS_PORT" \
             --exclude ".git/" \
             --exclude ".github/" \
             --exclude "node_modules/" \
