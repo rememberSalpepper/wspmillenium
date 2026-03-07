@@ -233,6 +233,20 @@ function createWebhookRouter({
       textPreview: previewText(prompt),
     });
 
+    try {
+      await whatsappService.markAsReadAndTyping(msgId);
+
+      log('info', 'inbound.read_typing_sent', {
+        msgId,
+        from,
+      });
+    } catch (waTypingErr) {
+      logError('whatsapp.read_typing_error', waTypingErr, {
+        msgId,
+        from,
+      });
+    }
+
     conversationStore.append(from, 'user', prompt);
 
     let reply;
@@ -246,7 +260,8 @@ function createWebhookRouter({
         from,
       });
 
-      const fallbackMessage = geminiService.isGeminiQuotaError(geminiErr)
+      const isQuotaError = geminiService.isGeminiQuotaError(geminiErr);
+      const fallbackMessage = isQuotaError
         ? FALLBACK_QUOTA_MESSAGE
         : FALLBACK_TEMPORARY_MESSAGE;
 
@@ -259,7 +274,7 @@ function createWebhookRouter({
           msgId,
           from,
           waMessageId: fallbackResponse?.messages?.[0]?.id || null,
-          fallbackType: geminiService.isGeminiQuotaError(geminiErr) ? 'quota' : 'temporary',
+          fallbackType: isQuotaError ? 'quota' : 'temporary',
         });
       } catch (waErr) {
         logError('whatsapp.fallback_send_error', waErr, {
