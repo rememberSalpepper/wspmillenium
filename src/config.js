@@ -25,6 +25,10 @@ const config = {
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   PORT: toNumber(process.env.PORT, 3000),
 
+  BOT_SYSTEM_INSTRUCTION:
+  process.env.BOT_SYSTEM_INSTRUCTION ||
+  'Responde siempre únicamente en español. No respondas en inglés ni en otro idioma. Si el usuario escribe en otro idioma, responde igualmente en español.',
+
   MAX_REPLY_CHARS: toNumber(process.env.MAX_REPLY_CHARS, 3500),
   GEMINI_TIMEOUT_MS: toNumber(process.env.GEMINI_TIMEOUT_MS, 20000),
   MESSAGE_MAX_AGE_SECONDS: toNumber(process.env.MESSAGE_MAX_AGE_SECONDS, 300),

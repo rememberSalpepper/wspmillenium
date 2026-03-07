@@ -29,6 +29,9 @@ log('info', 'config.ok', {
   CONTEXT_MAX_TURNS: config.CONTEXT_MAX_TURNS,
   CONTEXT_MAX_CHARS: config.CONTEXT_MAX_CHARS,
   IGNORE_SELF_MESSAGES: config.IGNORE_SELF_MESSAGES,
+
+  BOT_SYSTEM_INSTRUCTION: config.BOT_SYSTEM_INSTRUCTION ? 'OK' : 'MISSING',
+
 });
 
 const app = express();
@@ -69,6 +72,8 @@ app.get('/health', (req, res) => {
       contextMaxTurns: config.CONTEXT_MAX_TURNS,
       contextMaxChars: config.CONTEXT_MAX_CHARS,
       ignoreSelfMessages: config.IGNORE_SELF_MESSAGES,
+      hasSystemInstruction: Boolean(config.BOT_SYSTEM_INSTRUCTION),
+        
     },
   });
 });

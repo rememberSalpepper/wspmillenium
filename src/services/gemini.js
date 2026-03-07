@@ -27,6 +27,9 @@ function createGeminiService(config) {
       ai.models.generateContent({
         model: config.GEMINI_MODEL,
         contents,
+        config: {
+          systemInstruction: config.BOT_SYSTEM_INSTRUCTION,
+        },
       }),
       config.GEMINI_TIMEOUT_MS,
       'Gemini timeout'
