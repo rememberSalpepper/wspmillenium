@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+    image: wa-bot:latest
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    restart: unless-stopped
+    networks:
+      proxy:
+        aliases:
+          - wa-bot
+
+networks:
+  proxy:
+    external: true
+    name: edugeo_default

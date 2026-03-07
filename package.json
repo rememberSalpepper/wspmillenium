@@ -1,0 +1,16 @@
+{
+  "name": "wa-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WhatsApp Cloud API bot with Gemini",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.13.0",
+    "axios": "^1.11.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0"
+  }
+}
