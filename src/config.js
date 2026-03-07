@@ -32,6 +32,7 @@ const config = {
   MAX_REPLY_CHARS: toNumber(process.env.MAX_REPLY_CHARS, 3500),
   GEMINI_TIMEOUT_MS: toNumber(process.env.GEMINI_TIMEOUT_MS, 20000),
   MESSAGE_MAX_AGE_SECONDS: toNumber(process.env.MESSAGE_MAX_AGE_SECONDS, 300),
+  MESSAGE_BUFFER_MS: toNumber(process.env.MESSAGE_BUFFER_MS, 2500),
 
   DEDUP_TTL_MS: toNumber(process.env.DEDUP_TTL_MS, 6 * 60 * 60 * 1000),
   CONVERSATION_TTL_MS: toNumber(process.env.CONVERSATION_TTL_MS, 24 * 60 * 60 * 1000),

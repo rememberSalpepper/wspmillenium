@@ -89,6 +89,7 @@ function createWebhookRouter({
   dedupStore,
   conversationStore,
   senderQueue,
+  inboundBufferStore,
   whatsappService,
   geminiService,
 }) {
@@ -138,15 +139,10 @@ function createWebhookRouter({
         }
 
         if (event.kind === 'message') {
-          const from = event.payload?.message?.from || 'unknown';
-
-          void senderQueue
-            .enqueue(from, async () => {
-              await handleInboundTextMessage(event);
-            })
-            .catch((err) => {
-              logError('queue.processing_error', err, { from });
-            });
+          void stageInboundMessage(event).catch((err) => {
+            const from = event.payload?.message?.from || 'unknown';
+            logError('inbound.stage_error', err, { from });
+          });
         }
       }
     } catch (err) {
@@ -154,7 +150,7 @@ function createWebhookRouter({
     }
   });
 
-  async function handleInboundTextMessage(event) {
+  async function stageInboundMessage(event) {
     const message = event?.payload?.message || {};
     const metadata = event?.payload?.metadata || {};
 
@@ -224,7 +220,7 @@ function createWebhookRouter({
       return;
     }
 
-    log('info', 'inbound.accepted', {
+    log('info', 'inbound.buffered', {
       msgId,
       from,
       type,
@@ -233,17 +229,63 @@ function createWebhookRouter({
       textPreview: previewText(prompt),
     });
 
+    inboundBufferStore.push(
+      from,
+      {
+        msgId,
+        from,
+        text: prompt,
+        timestamp,
+        metadata,
+      },
+      async (batch) => {
+        void senderQueue
+          .enqueue(from, async () => {
+            await handleInboundBatch(batch);
+          })
+          .catch((err) => {
+            logError('queue.processing_error', err, { from });
+          });
+      }
+    );
+  }
+
+  async function handleInboundBatch(batch) {
+    const from = batch?.senderId || null;
+    const msgId = batch?.lastMsgId || null;
+    const prompt = String(batch?.combinedText || '').trim();
+
+    if (!from || !msgId || !prompt) {
+      log('info', 'batch.ignored_invalid', {
+        from,
+        msgId,
+        hasPrompt: Boolean(prompt),
+      });
+      return;
+    }
+
+    log('info', 'batch.accepted', {
+      from,
+      msgId,
+      count: batch.count,
+      combinedLength: prompt.length,
+      combinedPreview: previewText(prompt, 220),
+      batchMsgIds: Array.isArray(batch.items) ? batch.items.map((item) => item.msgId) : [],
+    });
+
     try {
       await whatsappService.markAsReadAndTyping(msgId);
 
       log('info', 'inbound.read_typing_sent', {
         msgId,
         from,
+        batchCount: batch.count,
       });
     } catch (waTypingErr) {
       logError('whatsapp.read_typing_error', waTypingErr, {
         msgId,
         from,
+        batchCount: batch.count,
       });
     }
 
@@ -253,11 +295,22 @@ function createWebhookRouter({
 
     try {
       const contents = conversationStore.buildContents(from);
+
+      log('info', 'gemini.context_summary', {
+        from,
+        turns: contents.length,
+        lastTurns: contents.slice(-4).map((item) => ({
+          role: item.role,
+          textPreview: previewText(item?.parts?.[0]?.text || '', 80),
+        })),
+      });
+
       reply = await geminiService.generateReply(contents);
     } catch (geminiErr) {
       logError('gemini.error', geminiErr, {
         msgId,
         from,
+        batchCount: batch.count,
       });
 
       const isQuotaError = geminiService.isGeminiQuotaError(geminiErr);
@@ -299,6 +352,7 @@ function createWebhookRouter({
         waMessageId: waResponse?.messages?.[0]?.id || null,
         replyLength: safeReply.length,
         replyPreview: previewText(safeReply),
+        batchCount: batch.count,
       });
     } catch (waErr) {
       logError('whatsapp.reply_send_error', waErr, {

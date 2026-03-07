@@ -7,6 +7,7 @@ const { SenderQueue } = require('./stores/senderQueue');
 const { createWhatsAppService } = require('./services/whatsapp');
 const { createGeminiService } = require('./services/gemini');
 const { createWebhookRouter } = require('./routes/webhook');
+const { InboundBufferStore } = require('./stores/inboundBufferStore');
 
 if (missingEnv.length > 0) {
   log('error', 'config.missing', { missingEnv });
@@ -49,6 +50,10 @@ const conversationStore = new ConversationStore({
 
 const senderQueue = new SenderQueue();
 
+const inboundBufferStore = new InboundBufferStore({
+  bufferMs: config.MESSAGE_BUFFER_MS,
+});
+
 const whatsappService = createWhatsAppService(config);
 const geminiService = createGeminiService(config);
 
@@ -62,6 +67,8 @@ app.get('/health', (req, res) => {
       processedMessageIds: dedupStore.size(),
       activeConversations: conversationStore.size(),
       activeSenderQueues: senderQueue.size(),
+      pendingInboundBuffers: inboundBufferStore.size(),
+
     },
     config: {
       graphVersion: config.GRAPH_VER,
@@ -73,7 +80,8 @@ app.get('/health', (req, res) => {
       contextMaxChars: config.CONTEXT_MAX_CHARS,
       ignoreSelfMessages: config.IGNORE_SELF_MESSAGES,
       hasSystemInstruction: Boolean(config.BOT_SYSTEM_INSTRUCTION),
-        
+      messageBufferMs: config.MESSAGE_BUFFER_MS,
+
     },
   });
 });
@@ -85,6 +93,7 @@ app.use(
     dedupStore,
     conversationStore,
     senderQueue,
+    inboundBufferStore,
     whatsappService,
     geminiService,
   })
