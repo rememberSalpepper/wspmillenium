@@ -17,6 +17,30 @@ function previewText(text, max = 160) {
   return clean.length > max ? `${clean.slice(0, max)}...` : clean;
 }
 
+function getUnsupportedMessageReply(type) {
+  const base =
+    'Por ahora solo puedo procesar mensajes de texto. Escríbeme tu consulta en texto.';
+
+  switch (type) {
+    case 'audio':
+      return 'Por ahora no puedo escuchar audios. Escríbeme tu mensaje en texto.';
+    case 'image':
+      return 'Por ahora no puedo analizar imágenes. Escríbeme tu consulta en texto.';
+    case 'sticker':
+      return 'Por ahora no puedo interpretar stickers. Escríbeme tu mensaje en texto.';
+    case 'video':
+      return 'Por ahora no puedo analizar videos. Escríbeme tu consulta en texto.';
+    case 'document':
+      return 'Por ahora no puedo leer documentos automáticamente. Escríbeme tu consulta en texto.';
+    case 'location':
+      return 'Por ahora no puedo procesar ubicaciones automáticamente. Escríbeme la información en texto.';
+    case 'contacts':
+      return 'Por ahora no puedo procesar contactos compartidos automáticamente. Escríbeme tu consulta en texto.';
+    default:
+      return base;
+  }
+}
+
 function truncateText(text, maxChars) {
   const clean = String(text || '').trim();
   if (!clean) return 'No pude generar una respuesta.';
@@ -189,6 +213,25 @@ function createWebhookRouter({
         from,
         type,
       });
+
+      const unsupportedReply = getUnsupportedMessageReply(type);
+      try {
+        await whatsappService.sendText(from, unsupportedReply);
+
+        log('info', 'outbound.unsupported_type_sent', {
+          msgId,
+          from,
+          type,
+        });
+      } catch (waErr) {
+        logError('whatsapp.unsupported_type_send_error', waErr, {
+          msgId,
+          from,
+          type,
+        });
+      }
+
+      
       return;
     }
 
