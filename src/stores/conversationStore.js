@@ -36,6 +36,15 @@ class ConversationStore {
     return existing;
   }
 
+  peekSession(id) {
+    this.cleanup();
+
+    const existing = this.sessions.get(id);
+    if (!existing) return null;
+
+    return existing;
+  }
+
   trimTurns(turns) {
     const recent = turns.slice(-this.maxTurns);
 
@@ -71,6 +80,11 @@ class ConversationStore {
 
     session.turns = this.trimTurns(session.turns);
     session.lastTouchedAt = Date.now();
+  }
+
+  hasTurns(id) {
+    const session = this.peekSession(id);
+    return Boolean(session?.turns?.length);
   }
 
   buildContents(id) {

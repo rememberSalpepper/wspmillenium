@@ -1,5 +1,12 @@
 require('dotenv').config();
 
+const {
+  DEFAULT_WELCOME_MESSAGE,
+  DEFAULT_HUMAN_HANDOFF_MESSAGE,
+  DEFAULT_EMERGENCY_MESSAGE,
+  buildBotSystemInstruction,
+} = require('./botPrompt');
+
 function toNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -16,6 +23,36 @@ function toBoolean(value, fallback) {
   return fallback;
 }
 
+function toMultilineText(value, fallback = '') {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  return String(value)
+    .replace(/\\n/g, '\n')
+    .trim();
+}
+
+const botPriceTable =
+  toMultilineText(process.env.BOT_PRICE_TABLE) ||
+  toMultilineText(process.env.BOT_PRICING_TABLE);
+
+const botAdditionalInstruction = toMultilineText(process.env.BOT_SYSTEM_INSTRUCTION);
+const botInstructionOverride = toMultilineText(process.env.BOT_SYSTEM_INSTRUCTION_OVERRIDE);
+const botWelcomeMessage =
+  toMultilineText(process.env.BOT_WELCOME_MESSAGE, DEFAULT_WELCOME_MESSAGE) ||
+  DEFAULT_WELCOME_MESSAGE;
+const botHumanHandoffMessage =
+  toMultilineText(process.env.BOT_HUMAN_HANDOFF_MESSAGE, DEFAULT_HUMAN_HANDOFF_MESSAGE) ||
+  DEFAULT_HUMAN_HANDOFF_MESSAGE;
+const botEmergencyMessage =
+  toMultilineText(process.env.BOT_EMERGENCY_MESSAGE, DEFAULT_EMERGENCY_MESSAGE) ||
+  DEFAULT_EMERGENCY_MESSAGE;
+const botSystemInstruction =
+  botInstructionOverride ||
+  buildBotSystemInstruction({
+    pricingTableText: botPriceTable,
+    extraInstruction: botAdditionalInstruction,
+  });
+
 const config = {
   VERIFY_TOKEN: process.env.VERIFY_TOKEN,
   WA_TOKEN: process.env.WHATSAPP_TOKEN,
@@ -25,9 +62,12 @@ const config = {
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   PORT: toNumber(process.env.PORT, 3000),
 
-  BOT_SYSTEM_INSTRUCTION:
-  process.env.BOT_SYSTEM_INSTRUCTION ||
-  'Responde siempre únicamente en español. No respondas en inglés ni en otro idioma. Si el usuario escribe en otro idioma, responde igualmente en español.',
+  BOT_SYSTEM_INSTRUCTION: botSystemInstruction,
+  BOT_PRICE_TABLE: botPriceTable,
+  BOT_WELCOME_MESSAGE: botWelcomeMessage,
+  BOT_HUMAN_HANDOFF_MESSAGE: botHumanHandoffMessage,
+  BOT_EMERGENCY_MESSAGE: botEmergencyMessage,
+  BOT_MAX_WORDS: toNumber(process.env.BOT_MAX_WORDS, 120),
 
   MAX_REPLY_CHARS: toNumber(process.env.MAX_REPLY_CHARS, 3500),
   GEMINI_TIMEOUT_MS: toNumber(process.env.GEMINI_TIMEOUT_MS, 20000),

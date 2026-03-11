@@ -1,5 +1,6 @@
 const express = require('express');
 const { log } = require('../logger');
+const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
 
 const FALLBACK_QUOTA_MESSAGE =
   'Se agotó la cuota de la cuenta API de IA. Estamos en pruebas. Intenta nuevamente en un rato.';
@@ -66,6 +67,45 @@ function logError(event, err, extra = {}) {
     status: err?.response?.status ?? err?.status ?? null,
     data: err?.response?.data || null,
   });
+}
+
+async function deliverReply({
+  from,
+  msgId,
+  body,
+  conversationStore,
+  whatsappService,
+  successEvent,
+  errorEvent,
+  logData = {},
+}) {
+  const cleanBody = String(body || '').trim();
+  if (!cleanBody) return false;
+
+  try {
+    const waResponse = await whatsappService.sendText(from, cleanBody);
+
+    conversationStore.append(from, 'assistant', cleanBody);
+
+    log('info', successEvent, {
+      msgId,
+      from,
+      waMessageId: waResponse?.messages?.[0]?.id || null,
+      replyLength: cleanBody.length,
+      replyPreview: previewText(cleanBody),
+      ...logData,
+    });
+
+    return true;
+  } catch (waErr) {
+    logError(errorEvent, waErr, {
+      msgId,
+      from,
+      ...logData,
+    });
+
+    return false;
+  }
 }
 
 function extractEvents(payload) {
@@ -307,6 +347,8 @@ function createWebhookRouter({
       return;
     }
 
+    const isFirstInteraction = !conversationStore.hasTurns(from);
+
     log('info', 'batch.accepted', {
       from,
       msgId,
@@ -333,6 +375,35 @@ function createWebhookRouter({
     }
 
     conversationStore.append(from, 'user', prompt);
+
+    const automatedReply = getAutomatedReply({
+      prompt,
+      isFirstInteraction,
+      config,
+    });
+
+    if (automatedReply) {
+      const safeAutomatedReply = truncateText(
+        limitReplyWords(automatedReply.body, config.BOT_MAX_WORDS),
+        config.MAX_REPLY_CHARS
+      );
+
+      await deliverReply({
+        from,
+        msgId,
+        body: safeAutomatedReply,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.policy_reply_sent',
+        errorEvent: 'whatsapp.policy_reply_send_error',
+        logData: {
+          policy: automatedReply.kind,
+          batchCount: batch.count,
+        },
+      });
+
+      return;
+    }
 
     let reply;
 
@@ -361,48 +432,39 @@ function createWebhookRouter({
         ? FALLBACK_QUOTA_MESSAGE
         : FALLBACK_TEMPORARY_MESSAGE;
 
-      try {
-        const fallbackResponse = await whatsappService.sendText(from, fallbackMessage);
-
-        conversationStore.append(from, 'assistant', fallbackMessage);
-
-        log('info', 'outbound.fallback_sent', {
-          msgId,
-          from,
-          waMessageId: fallbackResponse?.messages?.[0]?.id || null,
+      await deliverReply({
+        from,
+        msgId,
+        body: fallbackMessage,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.fallback_sent',
+        errorEvent: 'whatsapp.fallback_send_error',
+        logData: {
           fallbackType: isQuotaError ? 'quota' : 'temporary',
-        });
-      } catch (waErr) {
-        logError('whatsapp.fallback_send_error', waErr, {
-          msgId,
-          from,
-        });
-      }
+        },
+      });
 
       return;
     }
 
-    const safeReply = truncateText(reply, config.MAX_REPLY_CHARS);
+    const safeReply = truncateText(
+      limitReplyWords(reply, config.BOT_MAX_WORDS),
+      config.MAX_REPLY_CHARS
+    );
 
-    try {
-      const waResponse = await whatsappService.sendText(from, safeReply);
-
-      conversationStore.append(from, 'assistant', safeReply);
-
-      log('info', 'outbound.reply_sent', {
-        msgId,
-        from,
-        waMessageId: waResponse?.messages?.[0]?.id || null,
-        replyLength: safeReply.length,
-        replyPreview: previewText(safeReply),
+    await deliverReply({
+      from,
+      msgId,
+      body: safeReply,
+      conversationStore,
+      whatsappService,
+      successEvent: 'outbound.reply_sent',
+      errorEvent: 'whatsapp.reply_send_error',
+      logData: {
         batchCount: batch.count,
-      });
-    } catch (waErr) {
-      logError('whatsapp.reply_send_error', waErr, {
-        msgId,
-        from,
-      });
-    }
+      },
+    });
   }
 
   return router;

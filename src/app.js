@@ -80,6 +80,8 @@ app.get('/health', (req, res) => {
       contextMaxChars: config.CONTEXT_MAX_CHARS,
       ignoreSelfMessages: config.IGNORE_SELF_MESSAGES,
       hasSystemInstruction: Boolean(config.BOT_SYSTEM_INSTRUCTION),
+      hasPriceTable: Boolean(config.BOT_PRICE_TABLE),
+      botMaxWords: config.BOT_MAX_WORDS,
       messageBufferMs: config.MESSAGE_BUFFER_MS,
 
     },
