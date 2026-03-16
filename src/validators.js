@@ -4,8 +4,7 @@ function cleanText(value) {
 
 function normalizeRut(value) {
   const compact = String(value || '')
-    .replace(/\./g, '')
-    .replace(/\s+/g, '')
+    .replace(/[.\s]/g, '')
     .toUpperCase();
 
   const match = compact.match(/^(\d{7,8})-?([\dK])$/);
@@ -15,33 +14,9 @@ function normalizeRut(value) {
   return `${body}-${verifier}`;
 }
 
-function computeRutVerifier(body) {
-  const digits = String(body || '').replace(/\D/g, '');
-  if (!digits) return '';
-
-  let sum = 0;
-  let multiplier = 2;
-
-  for (let index = digits.length - 1; index >= 0; index -= 1) {
-    sum += Number(digits[index]) * multiplier;
-    multiplier = multiplier === 7 ? 2 : multiplier + 1;
-  }
-
-  const remainder = 11 - (sum % 11);
-  if (remainder === 11) return '0';
-  if (remainder === 10) return 'K';
-  return String(remainder);
-}
-
 function validateRut(value) {
   const normalized = normalizeRut(value);
-  if (!normalized) {
-    return { valid: false, value: null };
-  }
-
-  const [body, verifier] = normalized.split('-');
-  const expected = computeRutVerifier(body);
-  const valid = verifier === expected;
+  const valid = /^\d{7,8}-[\dK]$/.test(normalized);
 
   return {
     valid,
@@ -78,20 +53,23 @@ function validateEmail(value) {
 }
 
 function normalizePhone(value) {
-  const trimmed = cleanText(value);
-  if (!trimmed) return '';
-
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-
+  let digits = cleanText(value).replace(/\D/g, '');
   if (!digits) return '';
-  return hasPlus ? `+${digits}` : digits;
+
+  if (digits.startsWith('56') && digits.length > 9) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.startsWith('0') && digits.length > 8) {
+    digits = digits.slice(1);
+  }
+
+  return digits;
 }
 
 function validatePhone(value) {
   const normalized = normalizePhone(value);
-  const digits = normalized.replace(/\D/g, '');
-  const valid = digits.length >= 8;
+  const valid = /^\d{8,11}$/.test(normalized);
 
   return {
     valid,

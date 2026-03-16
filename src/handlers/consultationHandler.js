@@ -53,6 +53,16 @@ function clipText(value, maxLength) {
   return cleanValue.length > maxLength ? `${cleanValue.slice(0, maxLength - 3).trim()}...` : cleanValue;
 }
 
+function cleanText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function sanitizeOrientationText(value) {
+  return cleanText(value)
+    .replace(/^hola(?:\s+[a-záéíóúñ]+)?[,:\s-]*/i, '')
+    .replace(/^estimado(?:\/a)?(?:\s+[a-záéíóúñ]+)?[,:\s-]*/i, '');
+}
+
 function looksLikeGreeting(text) {
   const normalized = normalizeText(text);
   return GREETING_PATTERNS.includes(normalized);
@@ -64,7 +74,7 @@ function buildConsultationSummary({ patient, symptoms, orientation }) {
     `• Paciente: ${patient?.nombre || '-'}`,
     `• RUT: ${patient?.rut || '-'}`,
     `• Síntomas: ${clipText(symptoms, 120) || '-'}`,
-    `• Orientación: ${clipText(orientation, 180) || '-'}`,
+    `• Orientación: ${cleanText(orientation) || '-'}`,
     '',
     'Su caso quedó registrado y el agendamiento quedó pendiente.',
   ].join('\n');
@@ -119,13 +129,12 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
 
     const symptoms = clipText(extracted.sintomas || prompt, 220);
     const reason = clipText(extracted.motivoConsulta || prompt, 180);
-    const orientation = clipText(
+    const orientation = sanitizeOrientationText(
       await buildOrientation({
         patient: activePatient,
         symptoms,
         reason,
-      }),
-      240
+      })
     );
 
     patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION_SUMMARY);

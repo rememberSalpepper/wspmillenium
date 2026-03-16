@@ -3,9 +3,13 @@ const DEFAULT_WELCOME_MESSAGE = [
   '',
   'Soy Catalina, asistente del Dr. Luis Martínez.',
   '',
-  'Para continuar, necesito que complete un breve formulario de atención.',
+  'Para continuar, envíeme en un solo mensaje estos datos:',
   '',
-  'Comencemos: ¿Cuál es su RUT?',
+  'RUT: 12.345.678-9',
+  'Nombre completo: Juan Pérez Soto',
+  'Correo: juan@correo.cl',
+  'Teléfono: 912345678',
+  'Dirección: Calle 123, Providencia',
 ].join('\n');
 
 const DEFAULT_HUMAN_HANDOFF_MESSAGE =
@@ -51,10 +55,10 @@ function buildBotSystemInstruction({ pricingTableText, extraInstruction = '' }) 
     ].join('\n'),
     [
       'FLUJO DE ATENCION:',
-      '- Primero se completa el formulario de atencion.',
+      '- Primero se completa el formulario de atencion en un solo mensaje.',
       '- Luego se consultan sintomas y motivo de consulta.',
       '- Despues se entrega una orientacion breve y se deja la consulta registrada.',
-      '- No saltes pasos ni pidas todos los datos de una vez.',
+      '- Si falta algun dato, pide solo los datos faltantes o a corregir.',
     ].join('\n'),
     [
       'NORMAS MEDICAS:',
@@ -67,7 +71,8 @@ function buildBotSystemInstruction({ pricingTableText, extraInstruction = '' }) 
     ].join('\n'),
     [
       'REGLAS OPERATIVAS:',
-      '- Si falta informacion clave, pide solo 1 dato por mensaje.',
+      '- Para el formulario inicial, pide RUT, nombre, correo, telefono y direccion en un solo mensaje.',
+      '- Si faltan datos o vienen mal escritos, solicita solo esos datos.',
       '- Si preguntan por precios y no hay tabla configurada, no inventes montos.',
       '- No inventes disponibilidad ni confirmes horas medicas.',
       '- Si el usuario quiere hablar con una persona, deriva de inmediato.',
@@ -108,6 +113,26 @@ function buildFieldExtractionPrompt({ fieldLabel, userMessage }) {
   ].join('\n');
 }
 
+function buildFormExtractionInstruction() {
+  return [
+    'Extrae datos de un formulario de atencion enviado por WhatsApp en espanol de Chile.',
+    'Responde solo con JSON valido usando exactamente estas claves:',
+    '{"rut":null,"nombre":null,"correo":null,"telefono":null,"direccion":null}',
+    'En cada clave responde con texto o null.',
+    'No inventes datos. Si un campo no aparece, dejalo en null.',
+    'El usuario puede enviar uno, varios o todos los campos en el mismo mensaje.',
+    'Reconoce formatos con o sin etiquetas, por ejemplo RUT:, Nombre:, Correo:, Telefono:, Direccion:.',
+    'No agregues explicaciones, markdown ni texto adicional.',
+  ].join('\n');
+}
+
+function buildFormExtractionPrompt(userMessage) {
+  return [
+    'Extrae los datos del formulario desde el siguiente mensaje del usuario.',
+    `Mensaje: """${String(userMessage || '').trim()}"""`,
+  ].join('\n');
+}
+
 function buildConsultationExtractionInstruction() {
   return [
     'Analiza un mensaje de un paciente por WhatsApp.',
@@ -131,6 +156,9 @@ function buildConsultationOrientationInstruction() {
     'Eres un asistente medico orientativo de telemedicina.',
     'Entrega una orientacion breve sobre causas leves y comunes segun los sintomas descritos.',
     'Maximo 2 oraciones.',
+    'No saludes.',
+    'No uses el nombre del paciente.',
+    'Ve directo al punto.',
     'Nunca diagnostiques enfermedades graves.',
     'Nunca prescribas medicamentos.',
     'Siempre indica que debe validar con el doctor en la consulta.',
@@ -140,10 +168,9 @@ function buildConsultationOrientationInstruction() {
 
 function buildConsultationOrientationPrompt({ patientName, symptoms, reason }) {
   return [
-    `Paciente: ${String(patientName || 'Paciente').trim() || 'Paciente'}.`,
     `Sintomas: ${String(symptoms || '').trim() || 'No especificados'}.`,
     `Motivo de consulta: ${String(reason || '').trim() || 'No especificado'}.`,
-    'Entrega una orientacion breve y prudente.',
+    'Entrega una orientacion breve y prudente, sin saludo y sin mencionar el nombre del paciente.',
   ].join('\n');
 }
 
@@ -154,6 +181,8 @@ module.exports = {
   buildBotSystemInstruction,
   buildFieldExtractionInstruction,
   buildFieldExtractionPrompt,
+  buildFormExtractionInstruction,
+  buildFormExtractionPrompt,
   buildConsultationExtractionInstruction,
   buildConsultationExtractionPrompt,
   buildConsultationOrientationInstruction,

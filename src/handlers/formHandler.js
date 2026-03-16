@@ -1,6 +1,6 @@
 const {
-  buildFieldExtractionInstruction,
-  buildFieldExtractionPrompt,
+  buildFormExtractionInstruction,
+  buildFormExtractionPrompt,
 } = require('../botPrompt');
 const {
   FLOW_STATES,
@@ -14,61 +14,46 @@ const {
   validateAddress,
 } = require('../validators');
 
-const FORM_FIELD_CONFIG = {
-  [FLOW_STATES.COLLECTING_RUT]: {
+const FORM_FIELDS = [
+  {
     key: 'rut',
+    state: FLOW_STATES.COLLECTING_RUT,
     label: 'RUT',
-    extraRules: 'Si aparece con puntos o sin puntos, conserva solo el RUT. Ejemplo valido: 12.345.678-9 o 12345678-9.',
-    question: '¿Cuál es su RUT?',
-    correctionMessage:
-      'No pude verificar ese RUT. ¿Podrías escribirlo de nuevo? Por ejemplo: 12.345.678-9',
+    example: '12.345.678-9',
     validate: validateRut,
   },
-  [FLOW_STATES.COLLECTING_NOMBRE]: {
+  {
     key: 'nombre',
-    label: 'nombre completo',
-    extraRules: 'Debe incluir nombre y apellido. No inventes informacion.',
-    question: 'Gracias. ¿Cuál es su nombre completo?',
-    correctionMessage:
-      'Necesito su nombre y apellido para continuar. ¿Podrías escribirlos nuevamente?',
+    state: FLOW_STATES.COLLECTING_NOMBRE,
+    label: 'Nombre completo',
+    example: 'Juan Pérez Soto',
     validate: validateFullName,
   },
-  [FLOW_STATES.COLLECTING_CORREO]: {
+  {
     key: 'correo',
-    label: 'correo electronico',
-    extraRules: 'Extrae solo el correo electronico, sin texto adicional.',
-    question: 'Perfecto. ¿Cuál es su correo electrónico?',
-    correctionMessage:
-      'No pude reconocer ese correo. ¿Podrías escribirlo nuevamente? Ejemplo: nombre@correo.cl',
+    state: FLOW_STATES.COLLECTING_CORREO,
+    label: 'Correo',
+    example: 'juan@correo.cl',
     validate: validateEmail,
   },
-  [FLOW_STATES.COLLECTING_TELEFONO]: {
+  {
     key: 'telefono',
-    label: 'telefono de contacto',
-    extraRules: 'Extrae solo el numero de contacto. Puede incluir +56.',
-    question: 'Gracias. ¿Cuál es su teléfono de contacto?',
-    correctionMessage:
-      'No pude reconocer ese teléfono. ¿Podrías escribirlo nuevamente? Puede ser, por ejemplo, +56912345678',
+    state: FLOW_STATES.COLLECTING_TELEFONO,
+    label: 'Teléfono',
+    example: '912345678',
     validate: validatePhone,
   },
-  [FLOW_STATES.COLLECTING_DIRECCION]: {
+  {
     key: 'direccion',
-    label: 'direccion con comuna',
-    extraRules: 'Debe incluir direccion y comuna si aparecen en el mensaje.',
-    question: 'Por último, indíqueme su dirección con comuna.',
-    correctionMessage:
-      'Necesito su dirección con comuna para completar el formulario. ¿Podrías escribirla nuevamente?',
+    state: FLOW_STATES.COLLECTING_DIRECCION,
+    label: 'Dirección',
+    example: 'Calle 123, Providencia',
     validate: validateAddress,
   },
-};
-
-const FORM_SEQUENCE = [
-  FLOW_STATES.COLLECTING_RUT,
-  FLOW_STATES.COLLECTING_NOMBRE,
-  FLOW_STATES.COLLECTING_CORREO,
-  FLOW_STATES.COLLECTING_TELEFONO,
-  FLOW_STATES.COLLECTING_DIRECCION,
 ];
+
+const FORM_FIELD_CONFIG = Object.fromEntries(FORM_FIELDS.map((field) => [field.key, field]));
+const STATE_TO_FIELD = Object.fromEntries(FORM_FIELDS.map((field) => [field.state, field.key]));
 
 const AFFIRMATIVE_PATTERNS = [
   /\bsi\b/,
@@ -87,6 +72,22 @@ const CORRECTION_FIELD_PATTERNS = [
   { field: 'telefono', patterns: [/\btelefono\b/, /\btel[eé]fono\b/, /\bcelular\b/] },
   { field: 'direccion', patterns: [/\bdireccion\b/, /\bdirecci[oó]n\b/] },
 ];
+
+const LABEL_ALIASES = {
+  rut: 'rut',
+  nombre: 'nombre',
+  'nombre completo': 'nombre',
+  correo: 'correo',
+  email: 'correo',
+  mail: 'correo',
+  telefono: 'telefono',
+  'teléfono': 'telefono',
+  celular: 'telefono',
+  direccion: 'direccion',
+  'dirección': 'direccion',
+  'direccion con comuna': 'direccion',
+  'dirección con comuna': 'direccion',
+};
 
 function normalizeIntentText(value) {
   return String(value || '')
@@ -128,15 +129,26 @@ function buildFormSummary(patient) {
   ].join('\n');
 }
 
-function getNextState(currentState) {
-  const currentIndex = FORM_SEQUENCE.indexOf(currentState);
-  if (currentIndex === -1) return FLOW_STATES.COLLECTING_RUT;
-
-  return FORM_SEQUENCE[currentIndex + 1] || FLOW_STATES.CONFIRMING_FORM;
+function buildFormTemplate(fields, intro) {
+  return [
+    intro,
+    '',
+    ...fields.map((field) => `${field.label}: ${field.example}`),
+  ].join('\n');
 }
 
 function buildNextQuestion(state) {
-  return FORM_FIELD_CONFIG[state]?.question || '¿Podría indicarme el dato nuevamente?';
+  const fieldKey = STATE_TO_FIELD[state];
+  const field = FORM_FIELD_CONFIG[fieldKey];
+
+  if (!field) {
+    return buildFormTemplate(FORM_FIELDS, 'Envíeme sus datos en un solo mensaje con este formato:');
+  }
+
+  return buildFormTemplate(
+    [field],
+    `Perfecto. Envíeme nuevamente solo este dato:`
+  );
 }
 
 function detectCorrectionField(prompt) {
@@ -163,57 +175,152 @@ function buildConsultationKickoffMessage() {
   ].join(' ');
 }
 
+function extractLabeledFields(prompt) {
+  const extracted = {
+    rut: null,
+    nombre: null,
+    correo: null,
+    telefono: null,
+    direccion: null,
+  };
+
+  const lines = String(prompt || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const separatorIndex = line.indexOf(':');
+    if (separatorIndex === -1) continue;
+
+    const rawLabel = line.slice(0, separatorIndex).trim();
+    const rawValue = line.slice(separatorIndex + 1).trim();
+    if (!rawLabel || !rawValue) continue;
+
+    const normalizedLabel = normalizeIntentText(rawLabel);
+    const fieldKey = LABEL_ALIASES[normalizedLabel];
+    if (!fieldKey) continue;
+
+    extracted[fieldKey] = rawValue;
+  }
+
+  return extracted;
+}
+
+function countExtractedFields(extracted) {
+  return FORM_FIELDS.filter((field) => {
+    const value = extracted?.[field.key];
+    return value !== null && value !== undefined && String(value).trim() !== '';
+  }).length;
+}
+
+function listMissingFields(patient) {
+  return FORM_FIELDS.filter((field) => !patient?.[field.key]);
+}
+
+function buildPendingFieldsMessage({ patient, invalidKeys = [], savedKeys = [] }) {
+  const missingFields = listMissingFields(patient);
+  const invalidFieldSet = new Set(invalidKeys);
+  const neededFields = FORM_FIELDS.filter(
+    (field) => invalidFieldSet.has(field.key) || missingFields.some((missing) => missing.key === field.key)
+  );
+
+  const intro =
+    neededFields.length === FORM_FIELDS.length
+      ? 'Para continuar, envíeme sus datos en un solo mensaje con este formato:'
+      : 'Me faltan algunos datos o vienen mal escritos. Envíemelos en un solo mensaje con este formato:';
+
+  const sections = [];
+
+  if (savedKeys.length > 0) {
+    const savedLabels = savedKeys
+      .map((key) => FORM_FIELD_CONFIG[key]?.label)
+      .filter(Boolean)
+      .join(', ');
+
+    if (savedLabels) {
+      sections.push(`Ya registré: ${savedLabels}.`);
+    }
+  }
+
+  if (invalidKeys.length > 0) {
+    const invalidLabels = invalidKeys
+      .map((key) => FORM_FIELD_CONFIG[key]?.label)
+      .filter(Boolean)
+      .join(', ');
+
+    if (invalidLabels) {
+      sections.push(`Revise estos datos: ${invalidLabels}. Solo necesito que estén bien escritos.`);
+    }
+  }
+
+  sections.push(buildFormTemplate(neededFields, intro));
+
+  return sections.join('\n\n');
+}
+
 function createFormHandler({ database, patientFlowStore, geminiService }) {
-  async function extractFieldValue({ config, prompt }) {
+  async function extractFormData(prompt) {
+    const labeledFields = extractLabeledFields(prompt);
+    if (countExtractedFields(labeledFields) > 0) {
+      return labeledFields;
+    }
+
     const rawResponse = await geminiService.generateText({
-      prompt: buildFieldExtractionPrompt({
-        fieldLabel: config.label,
-        userMessage: prompt,
-      }),
-      systemInstruction: buildFieldExtractionInstruction({
-        fieldLabel: config.label,
-        extraRules: config.extraRules,
-      }),
+      prompt: buildFormExtractionPrompt(prompt),
+      systemInstruction: buildFormExtractionInstruction(),
     });
 
-    return parseJsonResponse(rawResponse);
+    return parseJsonResponse(rawResponse) || {};
   }
 
   async function handleFieldCollection({ phone, prompt, state }) {
-    const config = FORM_FIELD_CONFIG[state] || FORM_FIELD_CONFIG[FLOW_STATES.COLLECTING_RUT];
-    const extraction = await extractFieldValue({ config, prompt });
+    const extractedFields = await extractFormData(prompt);
+    const savedKeys = [];
+    const invalidKeys = [];
 
-    if (!extraction?.valid || extraction?.value === null || extraction?.value === undefined) {
-      return {
-        body: config.correctionMessage,
-      };
+    for (const field of FORM_FIELDS) {
+      const rawValue = extractedFields?.[field.key];
+      if (rawValue === null || rawValue === undefined || String(rawValue).trim() === '') {
+        continue;
+      }
+
+      const validation = field.validate(rawValue);
+      if (!validation.valid || !validation.value) {
+        invalidKeys.push(field.key);
+        continue;
+      }
+
+      database.upsertPatientField(phone, field.key, validation.value);
+      savedKeys.push(field.key);
     }
 
-    const validation = config.validate(extraction.value);
-
-    if (!validation.valid || !validation.value) {
-      return {
-        body: config.correctionMessage,
-      };
-    }
-
-    database.upsertPatientField(phone, config.key, validation.value);
     const patient = database.getPatientByPhone(phone);
-    const nextState = getNextState(state);
+    const nextState = patientFlowStore.syncState(phone, patient);
 
     if (nextState === FLOW_STATES.CONFIRMING_FORM) {
-      patientFlowStore.syncState(phone, patient);
-
       return {
         body: buildFormSummary(patient),
         skipWordLimit: true,
       };
     }
 
-    patientFlowStore.setState(phone, nextState);
+    const currentFieldKey = STATE_TO_FIELD[state];
+
+    if (savedKeys.length === 0 && invalidKeys.length === 0 && currentFieldKey) {
+      return {
+        body: buildNextQuestion(state),
+        skipWordLimit: true,
+      };
+    }
 
     return {
-      body: buildNextQuestion(nextState),
+      body: buildPendingFieldsMessage({
+        patient,
+        invalidKeys,
+        savedKeys,
+      }),
+      skipWordLimit: true,
     };
   }
 
@@ -225,7 +332,8 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
       patientFlowStore.setState(phone, nextState);
 
       return {
-        body: `Perfecto, actualicemos ese dato. ${buildNextQuestion(nextState)}`,
+        body: buildNextQuestion(nextState),
+        skipWordLimit: true,
       };
     }
 
@@ -240,7 +348,7 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
 
     return {
       body:
-        'Indíqueme si los datos están correctos respondiendo "sí", o dígame cuál dato desea corregir: RUT, nombre, correo, teléfono o dirección.',
+        'Responda "sí" si los datos están correctos. Si quiere corregir algo, escriba el dato que desea corregir: RUT, nombre, correo, teléfono o dirección.',
     };
   }
 
@@ -261,5 +369,5 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
 
 module.exports = {
   createFormHandler,
-  FORM_FIELD_CONFIG,
+  FORM_FIELDS,
 };
