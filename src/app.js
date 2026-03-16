@@ -8,6 +8,10 @@ const { createWhatsAppService } = require('./services/whatsapp');
 const { createGeminiService } = require('./services/gemini');
 const { createWebhookRouter } = require('./routes/webhook');
 const { InboundBufferStore } = require('./stores/inboundBufferStore');
+const { createDatabase } = require('./database');
+const { PatientFlowStore } = require('./stores/patientFlowStore');
+const { createFormHandler } = require('./handlers/formHandler');
+const { createConsultationHandler } = require('./handlers/consultationHandler');
 
 if (missingEnv.length > 0) {
   log('error', 'config.missing', { missingEnv });
@@ -29,6 +33,8 @@ log('info', 'config.ok', {
   CONVERSATION_TTL_MS: config.CONVERSATION_TTL_MS,
   CONTEXT_MAX_TURNS: config.CONTEXT_MAX_TURNS,
   CONTEXT_MAX_CHARS: config.CONTEXT_MAX_CHARS,
+  PATIENT_FLOW_TTL_MS: config.PATIENT_FLOW_TTL_MS,
+  DB_PATH: config.DB_PATH,
   IGNORE_SELF_MESSAGES: config.IGNORE_SELF_MESSAGES,
 
   BOT_SYSTEM_INSTRUCTION: config.BOT_SYSTEM_INSTRUCTION ? 'OK' : 'MISSING',
@@ -54,8 +60,23 @@ const inboundBufferStore = new InboundBufferStore({
   bufferMs: config.MESSAGE_BUFFER_MS,
 });
 
+const database = createDatabase(config);
 const whatsappService = createWhatsAppService(config);
 const geminiService = createGeminiService(config);
+const patientFlowStore = new PatientFlowStore({
+  database,
+  ttlMs: config.PATIENT_FLOW_TTL_MS,
+});
+const formHandler = createFormHandler({
+  database,
+  patientFlowStore,
+  geminiService,
+});
+const consultationHandler = createConsultationHandler({
+  database,
+  patientFlowStore,
+  geminiService,
+});
 
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -68,6 +89,7 @@ app.get('/health', (req, res) => {
       activeConversations: conversationStore.size(),
       activeSenderQueues: senderQueue.size(),
       pendingInboundBuffers: inboundBufferStore.size(),
+      activePatientFlows: patientFlowStore.size(),
 
     },
     config: {
@@ -83,6 +105,8 @@ app.get('/health', (req, res) => {
       hasPriceTable: Boolean(config.BOT_PRICE_TABLE),
       botMaxWords: config.BOT_MAX_WORDS,
       messageBufferMs: config.MESSAGE_BUFFER_MS,
+      patientFlowTtlMs: config.PATIENT_FLOW_TTL_MS,
+      dbPath: config.DB_PATH,
 
     },
   });
@@ -98,6 +122,10 @@ app.use(
     inboundBufferStore,
     whatsappService,
     geminiService,
+    database,
+    patientFlowStore,
+    formHandler,
+    consultationHandler,
   })
 );
 
@@ -119,6 +147,7 @@ app.use((err, req, res, next) => {
 setInterval(() => {
   dedupStore.cleanup();
   conversationStore.cleanup();
+  patientFlowStore.cleanup();
 }, 5 * 60 * 1000).unref();
 
 module.exports = {

@@ -30,14 +30,6 @@ const HUMAN_HANDOFF_PATTERNS = [
   /\bnecesito\b.{0,20}\b(persona|humano|humana|asesor|asesora|agente|operador)\b/,
 ];
 
-const DIAGNOSIS_PATTERNS = [
-  /\bdiagnostico\b/,
-  /\bdiagnosticar\b/,
-  /\bque enfermedad tengo\b/,
-  /\bcual es mi enfermedad\b/,
-  /\bque me pasa\b/,
-];
-
 function normalizeForMatch(value) {
   return String(value || '')
     .normalize('NFD')
@@ -68,10 +60,6 @@ function wantsHumanHandoff(text) {
   return hasPattern(text, HUMAN_HANDOFF_PATTERNS);
 }
 
-function wantsDiagnosis(text) {
-  return hasPattern(text, DIAGNOSIS_PATTERNS);
-}
-
 function limitReplyWords(text, maxWords) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return '';
@@ -97,7 +85,7 @@ function getAutomatedReply({ prompt, isFirstInteraction, config }) {
     };
   }
 
-  if (wantsHumanHandoff(prompt) || wantsDiagnosis(prompt)) {
+  if (wantsHumanHandoff(prompt)) {
     return {
       kind: 'human_handoff',
       body: config.BOT_HUMAN_HANDOFF_MESSAGE,
@@ -118,6 +106,5 @@ module.exports = {
   getAutomatedReply,
   isEmergencyMessage,
   wantsHumanHandoff,
-  wantsDiagnosis,
   limitReplyWords,
 };

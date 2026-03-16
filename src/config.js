@@ -1,3 +1,5 @@
+const path = require('path');
+
 require('dotenv').config();
 
 const {
@@ -67,7 +69,7 @@ const config = {
   BOT_WELCOME_MESSAGE: botWelcomeMessage,
   BOT_HUMAN_HANDOFF_MESSAGE: botHumanHandoffMessage,
   BOT_EMERGENCY_MESSAGE: botEmergencyMessage,
-  BOT_MAX_WORDS: toNumber(process.env.BOT_MAX_WORDS, 120),
+  BOT_MAX_WORDS: toNumber(process.env.BOT_MAX_WORDS, 80),
 
   MAX_REPLY_CHARS: toNumber(process.env.MAX_REPLY_CHARS, 3500),
   GEMINI_TIMEOUT_MS: toNumber(process.env.GEMINI_TIMEOUT_MS, 20000),
@@ -78,6 +80,11 @@ const config = {
   CONVERSATION_TTL_MS: toNumber(process.env.CONVERSATION_TTL_MS, 24 * 60 * 60 * 1000),
   CONTEXT_MAX_TURNS: toNumber(process.env.CONTEXT_MAX_TURNS, 12),
   CONTEXT_MAX_CHARS: toNumber(process.env.CONTEXT_MAX_CHARS, 12000),
+  PATIENT_FLOW_TTL_MS: toNumber(
+    process.env.PATIENT_FLOW_TTL_MS,
+    24 * 60 * 60 * 1000
+  ),
+  DB_PATH: process.env.DB_PATH || path.join(process.cwd(), 'data', 'bot.db'),
 
   IGNORE_SELF_MESSAGES: toBoolean(process.env.IGNORE_SELF_MESSAGES, true),
 };

@@ -22,13 +22,26 @@ function isGeminiQuotaError(err) {
 function createGeminiService(config) {
   const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
 
-  async function generateReply(contents) {
+  async function generateText({
+    contents = null,
+    prompt = '',
+    systemInstruction = config.BOT_SYSTEM_INSTRUCTION,
+  }) {
+    const requestContents = Array.isArray(contents) && contents.length > 0
+      ? contents
+      : [
+          {
+            role: 'user',
+            parts: [{ text: String(prompt || '').trim() }],
+          },
+        ];
+
     const result = await withTimeout(
       ai.models.generateContent({
         model: config.GEMINI_MODEL,
-        contents,
+        contents: requestContents,
         config: {
-          systemInstruction: config.BOT_SYSTEM_INSTRUCTION,
+          systemInstruction,
         },
       }),
       config.GEMINI_TIMEOUT_MS,
@@ -39,7 +52,12 @@ function createGeminiService(config) {
     return text || 'No pude generar una respuesta.';
   }
 
+  async function generateReply(contents) {
+    return generateText({ contents });
+  }
+
   return {
+    generateText,
     generateReply,
     isGeminiQuotaError,
   };

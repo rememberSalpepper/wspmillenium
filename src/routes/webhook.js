@@ -1,6 +1,7 @@
 const express = require('express');
 const { log } = require('../logger');
 const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
+const { FLOW_STATES, isFormCollectionState } = require('../stores/patientFlowStore');
 
 const FALLBACK_QUOTA_MESSAGE =
   'Se agotó la cuota de la cuenta API de IA. Estamos en pruebas. Intenta nuevamente en un rato.';
@@ -46,6 +47,15 @@ function truncateText(text, maxChars) {
   const clean = String(text || '').trim();
   if (!clean) return 'No pude generar una respuesta.';
   return clean.length > maxChars ? clean.slice(0, maxChars) : clean;
+}
+
+function applyReplyLimits(body, config, options = {}) {
+  const { skipWordLimit = false } = options;
+  const baseText = skipWordLimit
+    ? String(body || '').trim()
+    : limitReplyWords(body, config.BOT_MAX_WORDS);
+
+  return truncateText(baseText, config.MAX_REPLY_CHARS);
 }
 
 function isStaleMessage(timestampSeconds, maxAgeSeconds) {
@@ -156,6 +166,10 @@ function createWebhookRouter({
   inboundBufferStore,
   whatsappService,
   geminiService,
+  database,
+  patientFlowStore,
+  formHandler,
+  consultationHandler,
 }) {
   const router = express.Router();
 
@@ -347,7 +361,9 @@ function createWebhookRouter({
       return;
     }
 
-    const isFirstInteraction = !conversationStore.hasTurns(from);
+    const patient = database.getPatientByPhone(from);
+    const flowState = patientFlowStore.getState(from);
+    const isFirstInteraction = !conversationStore.hasTurns(from) && !patient;
 
     log('info', 'batch.accepted', {
       from,
@@ -383,10 +399,7 @@ function createWebhookRouter({
     });
 
     if (automatedReply) {
-      const safeAutomatedReply = truncateText(
-        limitReplyWords(automatedReply.body, config.BOT_MAX_WORDS),
-        config.MAX_REPLY_CHARS
-      );
+      const safeAutomatedReply = applyReplyLimits(automatedReply.body, config);
 
       await deliverReply({
         from,
@@ -399,6 +412,125 @@ function createWebhookRouter({
         logData: {
           policy: automatedReply.kind,
           batchCount: batch.count,
+        },
+      });
+
+      return;
+    }
+
+    if (isFormCollectionState(flowState)) {
+      let formReply;
+
+      try {
+        formReply = await formHandler.handleMessage({
+          phone: from,
+          prompt,
+          state: flowState,
+          patient,
+        });
+      } catch (formErr) {
+        logError('form.handler_error', formErr, {
+          msgId,
+          from,
+          state: flowState,
+        });
+
+        const isQuotaError = geminiService.isGeminiQuotaError(formErr);
+        const fallbackMessage = isQuotaError
+          ? FALLBACK_QUOTA_MESSAGE
+          : FALLBACK_TEMPORARY_MESSAGE;
+
+        await deliverReply({
+          from,
+          msgId,
+          body: fallbackMessage,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.form_fallback_sent',
+          errorEvent: 'whatsapp.form_fallback_send_error',
+          logData: {
+            fallbackType: isQuotaError ? 'quota' : 'temporary',
+            state: flowState,
+          },
+        });
+
+        return;
+      }
+
+      const safeFormReply = applyReplyLimits(formReply?.body, config, {
+        skipWordLimit: Boolean(formReply?.skipWordLimit),
+      });
+
+      await deliverReply({
+        from,
+        msgId,
+        body: safeFormReply,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.form_reply_sent',
+        errorEvent: 'whatsapp.form_reply_send_error',
+        logData: {
+          batchCount: batch.count,
+          state: flowState,
+        },
+      });
+
+      return;
+    }
+
+    if (flowState === FLOW_STATES.CONSULTATION) {
+      let consultationReply;
+
+      try {
+        consultationReply = await consultationHandler.handleMessage({
+          phone: from,
+          prompt,
+          patient,
+        });
+      } catch (consultationErr) {
+        logError('consultation.handler_error', consultationErr, {
+          msgId,
+          from,
+          state: flowState,
+        });
+
+        const isQuotaError = geminiService.isGeminiQuotaError(consultationErr);
+        const fallbackMessage = isQuotaError
+          ? FALLBACK_QUOTA_MESSAGE
+          : FALLBACK_TEMPORARY_MESSAGE;
+
+        await deliverReply({
+          from,
+          msgId,
+          body: fallbackMessage,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.consultation_fallback_sent',
+          errorEvent: 'whatsapp.consultation_fallback_send_error',
+          logData: {
+            fallbackType: isQuotaError ? 'quota' : 'temporary',
+            state: flowState,
+          },
+        });
+
+        return;
+      }
+
+      const safeConsultationReply = applyReplyLimits(consultationReply?.body, config, {
+        skipWordLimit: Boolean(consultationReply?.skipWordLimit),
+      });
+
+      await deliverReply({
+        from,
+        msgId,
+        body: safeConsultationReply,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.consultation_reply_sent',
+        errorEvent: 'whatsapp.consultation_reply_send_error',
+        logData: {
+          batchCount: batch.count,
+          consultationId: consultationReply?.consultationId || null,
         },
       });
 
@@ -448,10 +580,7 @@ function createWebhookRouter({
       return;
     }
 
-    const safeReply = truncateText(
-      limitReplyWords(reply, config.BOT_MAX_WORDS),
-      config.MAX_REPLY_CHARS
-    );
+    const safeReply = applyReplyLimits(reply, config);
 
     await deliverReply({
       from,

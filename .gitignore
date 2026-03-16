@@ -12,6 +12,7 @@ pnpm-debug.log*
 .DS_Store
 coverage/
 dist/
+data/
 
 .vscode/
 .idea/
