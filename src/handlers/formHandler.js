@@ -16,38 +16,33 @@ const {
 
 const FORM_FIELDS = [
   {
-    key: 'rut',
-    state: FLOW_STATES.COLLECTING_RUT,
-    label: 'RUT',
-    example: '12.345.678-9',
-    validate: validateRut,
-  },
-  {
     key: 'nombre',
     state: FLOW_STATES.COLLECTING_NOMBRE,
     label: 'Nombre completo',
-    example: 'Juan Pérez Soto',
     validate: validateFullName,
   },
   {
-    key: 'correo',
-    state: FLOW_STATES.COLLECTING_CORREO,
-    label: 'Correo',
-    example: 'juan@correo.cl',
-    validate: validateEmail,
+    key: 'rut',
+    state: FLOW_STATES.COLLECTING_RUT,
+    label: 'RUT',
+    validate: validateRut,
   },
   {
     key: 'telefono',
     state: FLOW_STATES.COLLECTING_TELEFONO,
     label: 'Teléfono',
-    example: '912345678',
     validate: validatePhone,
+  },
+  {
+    key: 'correo',
+    state: FLOW_STATES.COLLECTING_CORREO,
+    label: 'Correo',
+    validate: validateEmail,
   },
   {
     key: 'direccion',
     state: FLOW_STATES.COLLECTING_DIRECCION,
     label: 'Dirección',
-    example: 'Calle 123, Providencia',
     validate: validateAddress,
   },
 ];
@@ -133,7 +128,7 @@ function buildFormTemplate(fields, intro) {
   return [
     intro,
     '',
-    ...fields.map((field) => `${field.label}: ${field.example}`),
+    ...fields.map((field) => `${field.label}:`),
   ].join('\n');
 }
 
@@ -147,7 +142,7 @@ function buildNextQuestion(state) {
 
   return buildFormTemplate(
     [field],
-    `Perfecto. Envíeme nuevamente solo este dato:`
+    'Envíeme nuevamente este dato:'
   );
 }
 
@@ -218,45 +213,23 @@ function listMissingFields(patient) {
   return FORM_FIELDS.filter((field) => !patient?.[field.key]);
 }
 
-function buildPendingFieldsMessage({ patient, invalidKeys = [], savedKeys = [] }) {
+function buildPendingFieldsMessage({ patient, invalidKeys = [] }) {
   const missingFields = listMissingFields(patient);
   const invalidFieldSet = new Set(invalidKeys);
   const neededFields = FORM_FIELDS.filter(
     (field) => invalidFieldSet.has(field.key) || missingFields.some((missing) => missing.key === field.key)
   );
 
-  const intro =
-    neededFields.length === FORM_FIELDS.length
-      ? 'Para continuar, envíeme sus datos en un solo mensaje con este formato:'
-      : 'Me faltan algunos datos o vienen mal escritos. Envíemelos en un solo mensaje con este formato:';
-
-  const sections = [];
-
-  if (savedKeys.length > 0) {
-    const savedLabels = savedKeys
-      .map((key) => FORM_FIELD_CONFIG[key]?.label)
-      .filter(Boolean)
-      .join(', ');
-
-    if (savedLabels) {
-      sections.push(`Ya registré: ${savedLabels}.`);
-    }
+  let intro = 'Envíeme estos datos en un solo mensaje:';
+  if (invalidKeys.length > 0 && neededFields.length === invalidKeys.length) {
+    intro = 'Corrija estos datos:';
+  } else if (invalidKeys.length > 0) {
+    intro = 'Faltan o hay que corregir estos datos:';
+  } else if (neededFields.length !== FORM_FIELDS.length) {
+    intro = 'Faltan estos datos:';
   }
 
-  if (invalidKeys.length > 0) {
-    const invalidLabels = invalidKeys
-      .map((key) => FORM_FIELD_CONFIG[key]?.label)
-      .filter(Boolean)
-      .join(', ');
-
-    if (invalidLabels) {
-      sections.push(`Revise estos datos: ${invalidLabels}. Solo necesito que estén bien escritos.`);
-    }
-  }
-
-  sections.push(buildFormTemplate(neededFields, intro));
-
-  return sections.join('\n\n');
+  return buildFormTemplate(neededFields, intro);
 }
 
 function createFormHandler({ database, patientFlowStore, geminiService }) {
@@ -318,7 +291,6 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
       body: buildPendingFieldsMessage({
         patient,
         invalidKeys,
-        savedKeys,
       }),
       skipWordLimit: true,
     };

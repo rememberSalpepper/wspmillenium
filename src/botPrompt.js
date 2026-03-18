@@ -5,11 +5,11 @@ const DEFAULT_WELCOME_MESSAGE = [
   '',
   'Para continuar, envíeme en un solo mensaje estos datos:',
   '',
-  'RUT: 12.345.678-9',
-  'Nombre completo: Juan Pérez Soto',
-  'Correo: juan@correo.cl',
-  'Teléfono: 912345678',
-  'Dirección: Calle 123, Providencia',
+  'Nombre completo:',
+  'RUT:',
+  'Teléfono:',
+  'Correo:',
+  'Dirección:',
 ].join('\n');
 
 const DEFAULT_HUMAN_HANDOFF_MESSAGE =
