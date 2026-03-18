@@ -61,7 +61,7 @@ function wantsHumanHandoff(text) {
 }
 
 function limitReplyWords(text, maxWords) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  const clean = String(text || '').trim();
   if (!clean) return '';
 
   const limit = Number(maxWords);
@@ -69,12 +69,31 @@ function limitReplyWords(text, maxWords) {
     return clean;
   }
 
-  const words = clean.split(' ');
-  if (words.length <= limit) {
-    return clean;
+  const lines = clean.split('\n');
+  let wordCount = 0;
+  const resultLines = [];
+
+  for (const line of lines) {
+    const trimmedLine = line.replace(/[ \t]+/g, ' ').trim();
+    if (!trimmedLine) {
+      resultLines.push('');
+      continue;
+    }
+
+    const lineWords = trimmedLine.split(' ');
+    if (wordCount + lineWords.length <= limit) {
+      resultLines.push(trimmedLine);
+      wordCount += lineWords.length;
+    } else {
+      const remaining = limit - wordCount;
+      if (remaining > 0) {
+        resultLines.push(`${lineWords.slice(0, remaining).join(' ')}...`);
+      }
+      break;
+    }
   }
 
-  return `${words.slice(0, limit).join(' ')}...`;
+  return resultLines.join('\n').trim();
 }
 
 function getAutomatedReply({ prompt, isFirstInteraction, config }) {

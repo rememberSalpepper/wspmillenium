@@ -43,6 +43,17 @@ function getUnsupportedMessageReply(type) {
   }
 }
 
+function stripMarkdown(text) {
+  return String(text || '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/_(.+?)_/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`(.+?)`/g, '$1');
+}
+
 function truncateText(text, maxChars) {
   const clean = String(text || '').trim();
   if (!clean) return 'No pude generar una respuesta.';
@@ -51,9 +62,10 @@ function truncateText(text, maxChars) {
 
 function applyReplyLimits(body, config, options = {}) {
   const { skipWordLimit = false } = options;
+  const stripped = stripMarkdown(body);
   const baseText = skipWordLimit
-    ? String(body || '').trim()
-    : limitReplyWords(body, config.BOT_MAX_WORDS);
+    ? String(stripped || '').trim()
+    : limitReplyWords(stripped, config.BOT_MAX_WORDS);
 
   return truncateText(baseText, config.MAX_REPLY_CHARS);
 }
@@ -399,7 +411,9 @@ function createWebhookRouter({
     });
 
     if (automatedReply) {
-      const safeAutomatedReply = applyReplyLimits(automatedReply.body, config);
+      const safeAutomatedReply = applyReplyLimits(automatedReply.body, config, {
+        skipWordLimit: true,
+      });
 
       await deliverReply({
         from,

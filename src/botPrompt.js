@@ -53,6 +53,7 @@ function buildBotSystemInstruction({ pricingTableText, extraInstruction = '' }) 
       '- No uses listas largas ni explicaciones extensas.',
       '- Si la pregunta es simple, responde en una sola frase.',
       '- Usa maximo 1 o 2 emojis por mensaje para hacerlo mas cercano y amigable.',
+      '- No uses formato markdown ni asteriscos. Escribe texto plano solamente.',
     ].join('\n'),
     [
       'FLUJO DE ATENCION:',
