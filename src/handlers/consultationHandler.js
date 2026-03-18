@@ -108,15 +108,21 @@ function formatDiagnostics(rawResponse) {
   const parsed = parseJsonResponse(rawResponse);
 
   if (Array.isArray(parsed) && parsed.length > 0) {
-    return parsed
-      .filter((d) => d?.diagnostico)
-      .map((d) => `• ${d.diagnostico}: ${cleanText(d.explicacion) || 'Sin detalle.'}`)
-      .join('\n');
+    const items = parsed.filter((d) => d?.diagnostico);
+    if (items.length > 0) {
+      return items
+        .map((d) => {
+          const name = cleanText(d.diagnostico);
+          const explanation = cleanText(d.explicacion) || 'Pendiente de evaluación médica.';
+          return `${name}:\n• ${explanation}`;
+        })
+        .join('\n\n');
+    }
   }
 
   const fallback = cleanText(rawResponse);
-  if (fallback) return `• ${fallback}`;
-  return '• Orientación general pendiente de evaluación médica.';
+  if (fallback) return `Orientación general:\n• ${fallback}`;
+  return 'Orientación general:\n• Pendiente de evaluación médica.';
 }
 
 function buildConsultationSummary({ patient, diagnosticsText }) {
@@ -127,11 +133,11 @@ function buildConsultationSummary({ patient, diagnosticsText }) {
     `Nombre: ${patient?.nombre || '-'}`,
     '',
     '🩺 Posibles diagnósticos:',
+    '',
     diagnosticsText,
     '',
-    'Recuerde que esta orientación debe ser validada por el doctor.',
-    '',
-    '¿Desea agendar una hora con el Dr. Luis Martínez? 😊',
+    'En cualquier caso, lo mejor es validar con el doctor.',
+    '¿Desea que le agende una hora? 😊',
   ].join('\n');
 }
 
