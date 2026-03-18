@@ -15,7 +15,7 @@ function createDatabase(config) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS patients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone TEXT UNIQUE NOT NULL,
+      phone TEXT NOT NULL,
       rut TEXT,
       nombre TEXT,
       correo TEXT,
@@ -41,17 +41,60 @@ function createDatabase(config) {
     );
   `);
 
-  const ensurePatientStmt = db.prepare(`
-    INSERT INTO patients (phone, created_at, updated_at)
-    VALUES (?, datetime('now'), datetime('now'))
-    ON CONFLICT(phone) DO NOTHING
+  const hasUniquePhone = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='patients'`)
+    .get();
+
+  if (hasUniquePhone?.sql && /phone\s+TEXT\s+UNIQUE/i.test(hasUniquePhone.sql)) {
+    db.exec(`
+      CREATE TABLE patients_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT NOT NULL,
+        rut TEXT,
+        nombre TEXT,
+        correo TEXT,
+        telefono TEXT,
+        direccion TEXT,
+        form_completed INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO patients_new
+        SELECT * FROM patients;
+
+      DROP TABLE patients;
+
+      ALTER TABLE patients_new RENAME TO patients;
+    `);
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_rut
+      ON patients(rut) WHERE rut IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_patients_phone
+      ON patients(phone);
   `);
 
   const getPatientByPhoneStmt = db.prepare(`
     SELECT *
     FROM patients
     WHERE phone = ?
+    ORDER BY updated_at DESC
     LIMIT 1
+  `);
+
+  const getPatientByRutStmt = db.prepare(`
+    SELECT *
+    FROM patients
+    WHERE rut = ?
+    LIMIT 1
+  `);
+
+  const insertPatientStmt = db.prepare(`
+    INSERT INTO patients (phone, created_at, updated_at)
+    VALUES (?, datetime('now'), datetime('now'))
   `);
 
   const isFormCompletedStmt = db.prepare(`
@@ -61,11 +104,11 @@ function createDatabase(config) {
     LIMIT 1
   `);
 
-  const markFormCompletedStmt = db.prepare(`
+  const markFormCompletedByIdStmt = db.prepare(`
     UPDATE patients
     SET form_completed = 1,
         updated_at = datetime('now')
-    WHERE phone = ?
+    WHERE id = ?
   `);
 
   const createConsultationStmt = db.prepare(`
@@ -95,8 +138,11 @@ function createDatabase(config) {
       throw new Error('Phone is required');
     }
 
-    ensurePatientStmt.run(cleanPhone);
-    return cleanPhone;
+    const existing = getPatientByPhoneStmt.get(cleanPhone);
+    if (existing) return existing;
+
+    insertPatientStmt.run(cleanPhone);
+    return getPatientByPhoneStmt.get(cleanPhone);
   }
 
   function getPatientByPhone(phone) {
@@ -105,26 +151,55 @@ function createDatabase(config) {
     return getPatientByPhoneStmt.get(cleanPhone) || null;
   }
 
+  function getPatientByRut(rut) {
+    const cleanRut = String(rut || '').trim();
+    if (!cleanRut) return null;
+    return getPatientByRutStmt.get(cleanRut) || null;
+  }
+
   function upsertPatientField(phone, field, value) {
-    const cleanPhone = ensurePatient(phone);
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) throw new Error('Phone is required');
     if (!PATIENT_FIELDS.has(field)) {
       throw new Error(`Unsupported patient field: ${field}`);
     }
+
+    const cleanValue = String(value || '').trim();
+
+    if (field === 'rut') {
+      const existingByRut = getPatientByRut(cleanValue);
+      if (existingByRut && existingByRut.phone !== cleanPhone) {
+        const updatePhoneStmt = db.prepare(`
+          UPDATE patients
+          SET phone = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `);
+        updatePhoneStmt.run(cleanPhone, existingByRut.id);
+        return getPatientByPhone(cleanPhone);
+      }
+    }
+
+    const patient = ensurePatient(cleanPhone);
 
     const stmt = db.prepare(`
       UPDATE patients
       SET ${field} = ?,
           updated_at = datetime('now')
-      WHERE phone = ?
+      WHERE id = ?
     `);
 
-    stmt.run(String(value || '').trim(), cleanPhone);
+    stmt.run(cleanValue, patient.id);
     return getPatientByPhone(cleanPhone);
   }
 
   function markFormCompleted(phone) {
-    const cleanPhone = ensurePatient(phone);
-    markFormCompletedStmt.run(cleanPhone);
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) throw new Error('Phone is required');
+
+    const patient = getPatientByPhone(cleanPhone);
+    if (!patient) throw new Error('Patient not found');
+
+    markFormCompletedByIdStmt.run(patient.id);
     return getPatientByPhone(cleanPhone);
   }
 
@@ -182,6 +257,7 @@ function createDatabase(config) {
     db,
     dbPath,
     getPatientByPhone,
+    getPatientByRut,
     upsertPatientField,
     markFormCompleted,
     isFormCompleted,

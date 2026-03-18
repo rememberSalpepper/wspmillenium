@@ -492,7 +492,11 @@ function createWebhookRouter({
       return;
     }
 
-    if (flowState === FLOW_STATES.CONSULTATION || flowState === FLOW_STATES.AWAITING_APPOINTMENT) {
+    if (
+      flowState === FLOW_STATES.CONSULTATION ||
+      flowState === FLOW_STATES.AWAITING_APPOINTMENT ||
+      flowState === FLOW_STATES.COMPLETED
+    ) {
       let consultationReply;
 
       try {

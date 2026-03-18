@@ -187,6 +187,11 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
       return handleAppointmentResponse({ phone, prompt });
     }
 
+    if (currentState === FLOW_STATES.COMPLETED) {
+      patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION);
+      return { body: CONSULTATION_PROMPT };
+    }
+
     if (!activePatient?.form_completed) {
       patientFlowStore.syncState(phone, activePatient);
       return { body: CONSULTATION_PROMPT };
