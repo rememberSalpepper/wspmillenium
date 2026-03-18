@@ -46,6 +46,8 @@ function createDatabase(config) {
     .get();
 
   if (hasUniquePhone?.sql && /phone\s+TEXT\s+UNIQUE/i.test(hasUniquePhone.sql)) {
+    db.pragma('foreign_keys = OFF');
+
     db.exec(`
       CREATE TABLE patients_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +69,8 @@ function createDatabase(config) {
 
       ALTER TABLE patients_new RENAME TO patients;
     `);
+
+    db.pragma('foreign_keys = ON');
   }
 
   db.exec(`
