@@ -8,6 +8,7 @@ const FLOW_STATES = {
   CONFIRMING_FORM: 'confirming_form',
   CONSULTATION: 'consultation',
   CONSULTATION_SUMMARY: 'consultation_summary',
+  AWAITING_APPOINTMENT: 'awaiting_appointment',
   COMPLETED: 'completed',
 };
 

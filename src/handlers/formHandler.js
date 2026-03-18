@@ -113,12 +113,13 @@ function parseJsonResponse(text) {
 
 function buildFormSummary(patient) {
   return [
-    'Estos son los datos registrados:',
-    `• RUT: ${patient?.rut || '-'}`,
-    `• Nombre: ${patient?.nombre || '-'}`,
-    `• Correo: ${patient?.correo || '-'}`,
-    `• Teléfono: ${patient?.telefono || '-'}`,
-    `• Dirección: ${patient?.direccion || '-'}`,
+    '📝 Estos son los datos registrados:',
+    '',
+    `RUT: ${patient?.rut || '-'}`,
+    `Nombre: ${patient?.nombre || '-'}`,
+    `Correo: ${patient?.correo || '-'}`,
+    `Teléfono: ${patient?.telefono || '-'}`,
+    `Dirección: ${patient?.direccion || '-'}`,
     '',
     'Si todo está correcto, responda "sí". Si necesita corregir algo, indíqueme cuál dato.',
   ].join('\n');
@@ -165,7 +166,7 @@ function isAffirmative(prompt) {
 
 function buildConsultationKickoffMessage() {
   return [
-    'Gracias, su formulario quedó completo.',
+    'Gracias, su formulario quedó completo ✅',
     '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta.',
   ].join(' ');
 }

@@ -7,7 +7,13 @@ const {
 const { FLOW_STATES } = require('../stores/patientFlowStore');
 
 const CONSULTATION_PROMPT =
-  '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta.';
+  '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta 🩺';
+
+const APPOINTMENT_CONFIRM_MESSAGE =
+  'Perfecto, su agendamiento quedó pendiente. Nos pondremos en contacto para confirmar la hora 📅';
+
+const APPOINTMENT_DECLINE_MESSAGE =
+  'Entendido. Si más adelante necesita agendar, no dude en escribirnos. ¡Que se mejore! 🙏';
 
 const GREETING_PATTERNS = [
   'hola',
@@ -18,6 +24,32 @@ const GREETING_PATTERNS = [
   'gracias',
   'ok',
   'oki',
+];
+
+const AFFIRMATIVE_PATTERNS = [
+  /\bsi\b/,
+  /\bsí\b/,
+  /\bcorrecto\b/,
+  /\bquiero\b/,
+  /\bdale\b/,
+  /\bok\b/,
+  /\bya\b/,
+  /\bbueno\b/,
+  /\bpor favor\b/,
+  /\bporfavor\b/,
+  /\bagendar\b/,
+  /\bhora\b/,
+  /\bde acuerdo\b/,
+];
+
+const NEGATIVE_PATTERNS = [
+  /\bno\b/,
+  /\bnada\b/,
+  /\bno gracias\b/,
+  /\bno quiero\b/,
+  /\bno por ahora\b/,
+  /\bdespues\b/,
+  /\bdespués\b/,
 ];
 
 function normalizeText(value) {
@@ -36,7 +68,7 @@ function parseJsonResponse(text) {
   try {
     return JSON.parse(cleanText);
   } catch (err) {
-    const match = cleanText.match(/\{[\s\S]*\}/);
+    const match = cleanText.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
     if (!match) return null;
 
     try {
@@ -57,26 +89,49 @@ function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function sanitizeOrientationText(value) {
-  return cleanText(value)
-    .replace(/^hola(?:\s+[a-záéíóúñ]+)?[,:\s-]*/i, '')
-    .replace(/^estimado(?:\/a)?(?:\s+[a-záéíóúñ]+)?[,:\s-]*/i, '');
-}
-
 function looksLikeGreeting(text) {
   const normalized = normalizeText(text);
   return GREETING_PATTERNS.includes(normalized);
 }
 
-function buildConsultationSummary({ patient, symptoms, orientation }) {
+function isAffirmative(text) {
+  const normalized = normalizeText(text);
+  return AFFIRMATIVE_PATTERNS.some((p) => p.test(normalized));
+}
+
+function isNegative(text) {
+  const normalized = normalizeText(text);
+  return NEGATIVE_PATTERNS.some((p) => p.test(normalized));
+}
+
+function formatDiagnostics(rawResponse) {
+  const parsed = parseJsonResponse(rawResponse);
+
+  if (Array.isArray(parsed) && parsed.length > 0) {
+    return parsed
+      .filter((d) => d?.diagnostico)
+      .map((d) => `• ${d.diagnostico}: ${cleanText(d.explicacion) || 'Sin detalle.'}`)
+      .join('\n');
+  }
+
+  const fallback = cleanText(rawResponse);
+  if (fallback) return `• ${fallback}`;
+  return '• Orientación general pendiente de evaluación médica.';
+}
+
+function buildConsultationSummary({ patient, diagnosticsText }) {
   return [
-    '📋 Resumen de su consulta:',
-    `• Paciente: ${patient?.nombre || '-'}`,
-    `• RUT: ${patient?.rut || '-'}`,
-    `• Síntomas: ${clipText(symptoms, 120) || '-'}`,
-    `• Orientación: ${cleanText(orientation) || '-'}`,
+    '📋 Resumen de su consulta',
     '',
-    'Su caso quedó registrado y el agendamiento quedó pendiente.',
+    `RUT: ${patient?.rut || '-'}`,
+    `Nombre: ${patient?.nombre || '-'}`,
+    '',
+    '🩺 Posibles diagnósticos:',
+    diagnosticsText,
+    '',
+    'Recuerde que esta orientación debe ser validada por el doctor.',
+    '',
+    '¿Desea agendar una hora con el Dr. Luis Martínez? 😊',
   ].join('\n');
 }
 
@@ -90,59 +145,68 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
     return parseJsonResponse(rawResponse);
   }
 
-  async function buildOrientation({ patient, symptoms, reason }) {
-    return geminiService.generateText({
-      prompt: buildConsultationOrientationPrompt({
-        patientName: patient?.nombre,
-        symptoms,
-        reason,
-      }),
+  async function buildDiagnostics({ symptoms, reason }) {
+    const rawResponse = await geminiService.generateText({
+      prompt: buildConsultationOrientationPrompt({ symptoms, reason }),
       systemInstruction: buildConsultationOrientationInstruction(),
     });
+
+    return {
+      formatted: formatDiagnostics(rawResponse),
+      raw: cleanText(rawResponse),
+    };
+  }
+
+  function handleAppointmentResponse({ phone, prompt }) {
+    if (isAffirmative(prompt)) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: APPOINTMENT_CONFIRM_MESSAGE };
+    }
+
+    if (isNegative(prompt)) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: APPOINTMENT_DECLINE_MESSAGE };
+    }
+
+    return {
+      body: 'Responda "sí" si desea agendar una hora, o "no" si prefiere no agendar por ahora 😊',
+    };
   }
 
   async function handleMessage({ phone, prompt, patient }) {
     const activePatient = patient || database.getPatientByPhone(phone);
+    const currentState = patientFlowStore.getState(phone);
+
+    if (currentState === FLOW_STATES.AWAITING_APPOINTMENT) {
+      return handleAppointmentResponse({ phone, prompt });
+    }
 
     if (!activePatient?.form_completed) {
       patientFlowStore.syncState(phone, activePatient);
-      return {
-        body: CONSULTATION_PROMPT,
-      };
+      return { body: CONSULTATION_PROMPT };
     }
 
     if (looksLikeGreeting(prompt)) {
       patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION);
-      return {
-        body: CONSULTATION_PROMPT,
-      };
+      return { body: CONSULTATION_PROMPT };
     }
 
     const extracted = await extractConsultationDetails(prompt);
 
     if (!extracted?.valid) {
       patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION);
-      return {
-        body: CONSULTATION_PROMPT,
-      };
+      return { body: CONSULTATION_PROMPT };
     }
 
     const symptoms = clipText(extracted.sintomas || prompt, 220);
     const reason = clipText(extracted.motivoConsulta || prompt, 180);
-    const orientation = sanitizeOrientationText(
-      await buildOrientation({
-        patient: activePatient,
-        symptoms,
-        reason,
-      })
-    );
+    const diagnostics = await buildDiagnostics({ symptoms, reason });
 
     patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION_SUMMARY);
 
     const summary = buildConsultationSummary({
       patient: activePatient,
-      symptoms,
-      orientation,
+      diagnosticsText: diagnostics.formatted,
     });
 
     const consultationId = database.createConsultation({
@@ -150,11 +214,11 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
       patientId: activePatient.id,
       sintomas: symptoms,
       motivo: reason,
-      orientacion: orientation,
+      orientacion: diagnostics.raw,
       resumen: summary,
     });
 
-    patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+    patientFlowStore.setState(phone, FLOW_STATES.AWAITING_APPOINTMENT);
 
     return {
       body: summary,

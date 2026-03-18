@@ -13,7 +13,7 @@ const DEFAULT_WELCOME_MESSAGE = [
 ].join('\n');
 
 const DEFAULT_HUMAN_HANDOFF_MESSAGE =
-  'Te voy a derivar con una asistente humana para continuar por este medio. Si quieres adelantar el proceso, enviame tu nombre completo y RUT.';
+  'Te voy a derivar con una asistente humana para continuar por este medio 🙋‍♀️ Si quieres adelantar el proceso, envíame tu nombre completo y RUT.';
 
 const DEFAULT_EMERGENCY_MESSAGE =
   'Por los sintomas que describes, debes acudir a un servicio de urgencia de inmediato. No es seguro continuar esta evaluacion por WhatsApp. Como siguiente paso, busca atencion presencial ahora.';
@@ -52,6 +52,7 @@ function buildBotSystemInstruction({ pricingTableText, extraInstruction = '' }) 
       '- Se directa, breve y concreta.',
       '- No uses listas largas ni explicaciones extensas.',
       '- Si la pregunta es simple, responde en una sola frase.',
+      '- Usa maximo 1 o 2 emojis por mensaje para hacerlo mas cercano y amigable.',
     ].join('\n'),
     [
       'FLUJO DE ATENCION:',
@@ -154,23 +155,23 @@ function buildConsultationExtractionPrompt(userMessage) {
 function buildConsultationOrientationInstruction() {
   return [
     'Eres un asistente medico orientativo de telemedicina.',
-    'Entrega una orientacion breve sobre causas leves y comunes segun los sintomas descritos.',
-    'Maximo 2 oraciones.',
-    'No saludes.',
-    'No uses el nombre del paciente.',
-    'Ve directo al punto.',
+    'Entrega posibles diagnosticos leves y comunes segun los sintomas descritos.',
+    'Responde solo con un JSON array valido usando este formato exacto:',
+    '[{"diagnostico":"nombre del posible diagnostico","explicacion":"breve explicacion de por que podria ser esto"}]',
+    'Maximo 3 diagnosticos posibles.',
+    'Solo causas leves y comunes.',
     'Nunca diagnostiques enfermedades graves.',
     'Nunca prescribas medicamentos.',
-    'Siempre indica que debe validar con el doctor en la consulta.',
     'Responde en espanol simple de Chile.',
+    'No agregues explicaciones, markdown ni texto adicional fuera del JSON.',
   ].join('\n');
 }
 
-function buildConsultationOrientationPrompt({ patientName, symptoms, reason }) {
+function buildConsultationOrientationPrompt({ symptoms, reason }) {
   return [
     `Sintomas: ${String(symptoms || '').trim() || 'No especificados'}.`,
     `Motivo de consulta: ${String(reason || '').trim() || 'No especificado'}.`,
-    'Entrega una orientacion breve y prudente, sin saludo y sin mencionar el nombre del paciente.',
+    'Entrega los posibles diagnosticos leves como JSON array.',
   ].join('\n');
 }
 
