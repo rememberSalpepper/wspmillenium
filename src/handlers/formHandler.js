@@ -126,10 +126,13 @@ function buildFormSummary(patient) {
 }
 
 function buildFormTemplate(fields, intro) {
+  const useNumbering = fields.length > 1;
   return [
     intro,
     '',
-    ...fields.map((field) => `${field.label}:`),
+    ...fields.map((field, index) =>
+      useNumbering ? `${index + 1}. ${field.label}:` : `${field.label}:`
+    ),
   ].join('\n');
 }
 
@@ -167,8 +170,9 @@ function isAffirmative(prompt) {
 function buildConsultationKickoffMessage() {
   return [
     'Gracias, su formulario quedó completo ✅',
-    '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta.',
-  ].join(' ');
+    '',
+    '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta 🩺',
+  ].join('\n');
 }
 
 function extractLabeledFields(prompt) {

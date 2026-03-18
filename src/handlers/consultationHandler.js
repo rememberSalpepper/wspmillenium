@@ -10,10 +10,10 @@ const CONSULTATION_PROMPT =
   '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta 🩺';
 
 const APPOINTMENT_CONFIRM_MESSAGE =
-  'Perfecto, su agendamiento quedó pendiente. Nos pondremos en contacto para confirmar la hora 📅';
+  'Perfecto, su hora con el doctor quedó pendiente de confirmación. Nos pondremos en contacto para confirmar fecha y horario 📅';
 
 const APPOINTMENT_DECLINE_MESSAGE =
-  'Entendido. Si más adelante necesita agendar, no dude en escribirnos. ¡Que se mejore! 🙏';
+  'Entendido. Si más adelante desea agendar una hora con el doctor, no dude en escribirnos. ¡Que se mejore! 🙏';
 
 const GREETING_PATTERNS = [
   'hola',
@@ -111,33 +111,36 @@ function formatDiagnostics(rawResponse) {
     const items = parsed.filter((d) => d?.diagnostico);
     if (items.length > 0) {
       return items
-        .map((d) => {
+        .map((d, index) => {
           const name = cleanText(d.diagnostico);
           const explanation = cleanText(d.explicacion) || 'Pendiente de evaluación médica.';
-          return `${name}:\n• ${explanation}`;
+          return `${index + 1}. ${name}\n   ${explanation}`;
         })
         .join('\n\n');
     }
   }
 
   const fallback = cleanText(rawResponse);
-  if (fallback) return `Orientación general:\n• ${fallback}`;
-  return 'Orientación general:\n• Pendiente de evaluación médica.';
+  if (fallback) return `1. Orientación general\n   ${fallback}`;
+  return '1. Orientación general\n   Pendiente de evaluación médica.';
 }
 
 function buildConsultationSummary({ patient, diagnosticsText }) {
   return [
     '📋 Resumen de su consulta',
     '',
+    `Paciente: ${patient?.nombre || '-'}`,
     `RUT: ${patient?.rut || '-'}`,
-    `Nombre: ${patient?.nombre || '-'}`,
     '',
-    '🩺 Posibles diagnósticos:',
+    '🩺 Orientación médica',
+    '',
+    'Según los síntomas que describe, las posibles causas son:',
     '',
     diagnosticsText,
     '',
-    'En cualquier caso, lo mejor es validar con el doctor.',
-    '¿Desea que le agende una hora? 😊',
+    'Recuerde que esta es solo una orientación inicial. Un médico debe evaluar su caso para un diagnóstico definitivo.',
+    '',
+    '¿Desea agendar una hora con el doctor? 😊',
   ].join('\n');
 }
 
@@ -175,7 +178,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
     }
 
     return {
-      body: 'Responda "sí" si desea agendar una hora, o "no" si prefiere no agendar por ahora 😊',
+      body: 'Responda "sí" si desea agendar una hora con el doctor, o "no" si prefiere no agendar por ahora 😊',
     };
   }
 
