@@ -41,6 +41,9 @@ function createDatabase(config) {
     );
   `);
 
+  // Cleanup orphaned migration table if a previous attempt failed
+  db.exec('DROP TABLE IF EXISTS patients_new');
+
   // Migration: remove old UNIQUE constraint on phone if present
   const tableInfo = db
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='patients'")
@@ -49,25 +52,28 @@ function createDatabase(config) {
   if (tableInfo?.sql && /phone\s+TEXT\s+UNIQUE/i.test(tableInfo.sql)) {
     db.pragma('foreign_keys = OFF');
 
-    db.exec(`
-      CREATE TABLE patients_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone TEXT NOT NULL,
-        rut TEXT,
-        nombre TEXT,
-        correo TEXT,
-        telefono TEXT,
-        direccion TEXT,
-        form_completed INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-      );
+    const migrate = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE patients_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          phone TEXT NOT NULL,
+          rut TEXT,
+          nombre TEXT,
+          correo TEXT,
+          telefono TEXT,
+          direccion TEXT,
+          form_completed INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
 
-      INSERT INTO patients_new SELECT * FROM patients;
-      DROP TABLE patients;
-      ALTER TABLE patients_new RENAME TO patients;
-    `);
+        INSERT INTO patients_new SELECT * FROM patients;
+        DROP TABLE patients;
+        ALTER TABLE patients_new RENAME TO patients;
+      `);
+    });
 
+    migrate();
     db.pragma('foreign_keys = ON');
   }
 
