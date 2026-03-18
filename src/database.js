@@ -41,11 +41,12 @@ function createDatabase(config) {
     );
   `);
 
-  const hasUniquePhone = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='patients'`)
+  // Migration: remove old UNIQUE constraint on phone if present
+  const tableInfo = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='patients'")
     .get();
 
-  if (hasUniquePhone?.sql && /phone\s+TEXT\s+UNIQUE/i.test(hasUniquePhone.sql)) {
+  if (tableInfo?.sql && /phone\s+TEXT\s+UNIQUE/i.test(tableInfo.sql)) {
     db.pragma('foreign_keys = OFF');
 
     db.exec(`
@@ -62,38 +63,21 @@ function createDatabase(config) {
         updated_at TEXT DEFAULT (datetime('now'))
       );
 
-      INSERT INTO patients_new
-        SELECT * FROM patients;
-
+      INSERT INTO patients_new SELECT * FROM patients;
       DROP TABLE patients;
-
       ALTER TABLE patients_new RENAME TO patients;
     `);
 
     db.pragma('foreign_keys = ON');
   }
 
-  db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_rut
-      ON patients(rut) WHERE rut IS NOT NULL;
-
-    CREATE INDEX IF NOT EXISTS idx_patients_phone
-      ON patients(phone);
-  `);
+  // Drop the rut unique index if it was created before
+  try {
+    db.exec('DROP INDEX IF EXISTS idx_patients_rut');
+  } catch (_) {}
 
   const getPatientByPhoneStmt = db.prepare(`
-    SELECT *
-    FROM patients
-    WHERE phone = ?
-    ORDER BY updated_at DESC
-    LIMIT 1
-  `);
-
-  const getPatientByRutStmt = db.prepare(`
-    SELECT *
-    FROM patients
-    WHERE rut = ?
-    LIMIT 1
+    SELECT * FROM patients WHERE phone = ? ORDER BY updated_at DESC LIMIT 1
   `);
 
   const insertPatientStmt = db.prepare(`
@@ -102,45 +86,27 @@ function createDatabase(config) {
   `);
 
   const isFormCompletedStmt = db.prepare(`
-    SELECT form_completed
-    FROM patients
-    WHERE phone = ?
-    LIMIT 1
+    SELECT form_completed FROM patients WHERE phone = ? ORDER BY updated_at DESC LIMIT 1
   `);
 
   const markFormCompletedByIdStmt = db.prepare(`
-    UPDATE patients
-    SET form_completed = 1,
-        updated_at = datetime('now')
-    WHERE id = ?
+    UPDATE patients SET form_completed = 1, updated_at = datetime('now') WHERE id = ?
   `);
 
   const createConsultationStmt = db.prepare(`
     INSERT INTO consultations (
-      patient_id,
-      phone,
-      sintomas,
-      motivo_consulta,
-      orientacion,
-      resumen,
-      appointment_status,
-      appointment_date
+      patient_id, phone, sintomas, motivo_consulta,
+      orientacion, resumen, appointment_status, appointment_date
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const getLastConsultationStmt = db.prepare(`
-    SELECT *
-    FROM consultations
-    WHERE phone = ?
-    ORDER BY id DESC
-    LIMIT 1
+    SELECT * FROM consultations WHERE phone = ? ORDER BY id DESC LIMIT 1
   `);
 
   function ensurePatient(phone) {
     const cleanPhone = String(phone || '').trim();
-    if (!cleanPhone) {
-      throw new Error('Phone is required');
-    }
+    if (!cleanPhone) throw new Error('Phone is required');
 
     const existing = getPatientByPhoneStmt.get(cleanPhone);
     if (existing) return existing;
@@ -155,44 +121,18 @@ function createDatabase(config) {
     return getPatientByPhoneStmt.get(cleanPhone) || null;
   }
 
-  function getPatientByRut(rut) {
-    const cleanRut = String(rut || '').trim();
-    if (!cleanRut) return null;
-    return getPatientByRutStmt.get(cleanRut) || null;
-  }
-
   function upsertPatientField(phone, field, value) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) throw new Error('Phone is required');
-    if (!PATIENT_FIELDS.has(field)) {
-      throw new Error(`Unsupported patient field: ${field}`);
-    }
-
-    const cleanValue = String(value || '').trim();
-
-    if (field === 'rut') {
-      const existingByRut = getPatientByRut(cleanValue);
-      if (existingByRut && existingByRut.phone !== cleanPhone) {
-        const updatePhoneStmt = db.prepare(`
-          UPDATE patients
-          SET phone = ?, updated_at = datetime('now')
-          WHERE id = ?
-        `);
-        updatePhoneStmt.run(cleanPhone, existingByRut.id);
-        return getPatientByPhone(cleanPhone);
-      }
-    }
+    if (!PATIENT_FIELDS.has(field)) throw new Error(`Unsupported patient field: ${field}`);
 
     const patient = ensurePatient(cleanPhone);
 
     const stmt = db.prepare(`
-      UPDATE patients
-      SET ${field} = ?,
-          updated_at = datetime('now')
-      WHERE id = ?
+      UPDATE patients SET ${field} = ?, updated_at = datetime('now') WHERE id = ?
     `);
 
-    stmt.run(cleanValue, patient.id);
+    stmt.run(String(value || '').trim(), patient.id);
     return getPatientByPhone(cleanPhone);
   }
 
@@ -215,33 +155,21 @@ function createDatabase(config) {
   }
 
   function createConsultation({
-    phone,
-    patientId,
-    sintomas,
-    motivo,
-    orientacion,
-    resumen,
-    appointmentStatus = 'pending',
-    appointmentDate = null,
+    phone, patientId, sintomas, motivo,
+    orientacion, resumen,
+    appointmentStatus = 'pending', appointmentDate = null,
   }) {
     const cleanPhone = String(phone || '').trim();
-    if (!cleanPhone) {
-      throw new Error('Phone is required');
-    }
-
-    if (!patientId) {
-      throw new Error('patientId is required');
-    }
+    if (!cleanPhone) throw new Error('Phone is required');
+    if (!patientId) throw new Error('patientId is required');
 
     const result = createConsultationStmt.run(
-      patientId,
-      cleanPhone,
+      patientId, cleanPhone,
       String(sintomas || '').trim() || null,
       String(motivo || '').trim() || null,
       String(orientacion || '').trim() || null,
       String(resumen || '').trim() || null,
-      appointmentStatus,
-      appointmentDate
+      appointmentStatus, appointmentDate
     );
 
     return result.lastInsertRowid;
@@ -258,19 +186,11 @@ function createDatabase(config) {
   }
 
   return {
-    db,
-    dbPath,
-    getPatientByPhone,
-    getPatientByRut,
-    upsertPatientField,
-    markFormCompleted,
-    isFormCompleted,
-    createConsultation,
-    getLastConsultation,
-    close,
+    db, dbPath,
+    getPatientByPhone, upsertPatientField,
+    markFormCompleted, isFormCompleted,
+    createConsultation, getLastConsultation, close,
   };
 }
 
-module.exports = {
-  createDatabase,
-};
+module.exports = { createDatabase };
