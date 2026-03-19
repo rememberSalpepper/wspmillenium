@@ -11,11 +11,22 @@ const RESTART_PATTERNS = [
   /\bempezar desde cero\b/,
   /\bde nuevo\b/,
   /\bdesde cero\b/,
+  /\bnuevo\b/,
+  /\bnueva\b/,
   /\bnuevo paciente\b/,
   /\bnueva consulta\b/,
   /\botra consulta\b/,
-  /\breset/,
+  /\breset\b/,
 ];
+
+const RESET_COMMAND = /^\s*(?:borrar datos|borrar|reset|limpiar datos|limpiar)\s*$/;
+
+const CONFIRM_IDENTITY_MESSAGE = [
+  'Tenemos datos registrados a este número.',
+  '',
+  'Si eres la misma persona, responde "sí" para continuar.',
+  'Si eres otra persona, responde "nuevo" para iniciar desde cero.',
+].join('\n');
 
 function normalizeForPatterns(value) {
   return String(value || '')
@@ -29,6 +40,11 @@ function normalizeForPatterns(value) {
 function wantsRestart(prompt) {
   const normalized = normalizeForPatterns(prompt);
   return RESTART_PATTERNS.some((p) => p.test(normalized));
+}
+
+function isResetCommand(prompt) {
+  const normalized = normalizeForPatterns(prompt);
+  return RESET_COMMAND.test(normalized);
 }
 
 const FALLBACK_QUOTA_MESSAGE =
@@ -431,6 +447,68 @@ function createWebhookRouter({
     }
 
     conversationStore.append(from, 'user', prompt);
+
+    if (isResetCommand(prompt)) {
+      const deleted = database.resetPatient(from);
+      patientFlowStore.clearState(from);
+      conversationStore.clear(from);
+
+      log('info', 'flow.reset', { from, deletedPatients: deleted });
+
+      await deliverReply({
+        from,
+        msgId,
+        body: `Datos eliminados ✅ Escribe "hola" para comenzar de nuevo.`,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.reset_sent',
+        errorEvent: 'whatsapp.reset_send_error',
+      });
+
+      return;
+    }
+
+    const isNewSession = !conversationStore.hasTurns(from) ||
+      (conversationStore.turnCount(from) <= 1);
+    const hasStalePatient = patient?.form_completed && isNewSession && !isFirstInteraction;
+
+    if (hasStalePatient && flowState === FLOW_STATES.COMPLETED) {
+      const wantsNew = /\bnuevo\b|\bnueva\b|\botr[oa]\b/.test(normalizeForPatterns(prompt));
+
+      if (wantsNew || wantsRestart(prompt)) {
+        log('info', 'flow.stale_patient_reset', { from, oldPatientId: patient.id });
+
+        database.resetPatient(from);
+        patientFlowStore.clearState(from);
+        conversationStore.clear(from);
+
+        await deliverReply({
+          from,
+          msgId,
+          body: config.BOT_WELCOME_MESSAGE,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.stale_reset_welcome_sent',
+          errorEvent: 'whatsapp.stale_reset_welcome_send_error',
+        });
+
+        return;
+      }
+
+      if (!wantsRestart(prompt)) {
+        await deliverReply({
+          from,
+          msgId,
+          body: CONFIRM_IDENTITY_MESSAGE,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.confirm_identity_sent',
+          errorEvent: 'whatsapp.confirm_identity_send_error',
+        });
+
+        return;
+      }
+    }
 
     const automatedReply = getAutomatedReply({
       prompt,

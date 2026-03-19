@@ -87,6 +87,15 @@ class ConversationStore {
     return Boolean(session?.turns?.length);
   }
 
+  turnCount(id) {
+    const session = this.peekSession(id);
+    return session?.turns?.length || 0;
+  }
+
+  clear(id) {
+    this.sessions.delete(id);
+  }
+
   buildContents(id) {
     const session = this.getSession(id);
     const turns = this.trimTurns(session.turns);

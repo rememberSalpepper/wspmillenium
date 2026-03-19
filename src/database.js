@@ -233,6 +233,38 @@ function createDatabase(config) {
     return getSymptomsByConsultationStmt.all(consultationId);
   }
 
+  const resetPatientTransaction = db.transaction((phone) => {
+    const patients = db.prepare('SELECT id FROM patients WHERE phone = ?').all(phone);
+    const patientIds = patients.map((p) => p.id);
+
+    if (patientIds.length > 0) {
+      const placeholders = patientIds.map(() => '?').join(',');
+
+      const consultations = db
+        .prepare(`SELECT id FROM consultations WHERE patient_id IN (${placeholders})`)
+        .all(...patientIds);
+      const consultationIds = consultations.map((c) => c.id);
+
+      if (consultationIds.length > 0) {
+        const cPlaceholders = consultationIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM consultation_symptoms WHERE consultation_id IN (${cPlaceholders})`)
+          .run(...consultationIds);
+      }
+
+      db.prepare(`DELETE FROM consultations WHERE patient_id IN (${placeholders})`)
+        .run(...patientIds);
+      db.prepare(`DELETE FROM patients WHERE phone = ?`).run(phone);
+    }
+
+    return patientIds.length;
+  });
+
+  function resetPatient(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) throw new Error('Phone is required');
+    return resetPatientTransaction(cleanPhone);
+  }
+
   function close() {
     db.close();
   }
@@ -243,6 +275,7 @@ function createDatabase(config) {
     markFormCompleted, isFormCompleted,
     createConsultation, getLastConsultation,
     addSymptoms, getSymptomsByConsultation,
+    resetPatient,
     close,
   };
 }
