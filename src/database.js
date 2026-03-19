@@ -39,6 +39,14 @@ function createDatabase(config) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
+
+    CREATE TABLE IF NOT EXISTS consultation_symptoms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consultation_id INTEGER NOT NULL,
+      symptom TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (consultation_id) REFERENCES consultations(id)
+    );
   `);
 
   // Cleanup orphaned migration table if a previous attempt failed
@@ -110,12 +118,30 @@ function createDatabase(config) {
     SELECT * FROM consultations WHERE phone = ? ORDER BY id DESC LIMIT 1
   `);
 
+  const insertSymptomStmt = db.prepare(`
+    INSERT INTO consultation_symptoms (consultation_id, symptom)
+    VALUES (?, ?)
+  `);
+
+  const getSymptomsByConsultationStmt = db.prepare(`
+    SELECT id, symptom, created_at FROM consultation_symptoms
+    WHERE consultation_id = ? ORDER BY id ASC
+  `);
+
   function ensurePatient(phone) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) throw new Error('Phone is required');
 
     const existing = getPatientByPhoneStmt.get(cleanPhone);
     if (existing) return existing;
+
+    insertPatientStmt.run(cleanPhone);
+    return getPatientByPhoneStmt.get(cleanPhone);
+  }
+
+  function createNewPatient(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) throw new Error('Phone is required');
 
     insertPatientStmt.run(cleanPhone);
     return getPatientByPhoneStmt.get(cleanPhone);
@@ -187,15 +213,37 @@ function createDatabase(config) {
     return getLastConsultationStmt.get(cleanPhone) || null;
   }
 
+  const addSymptomsTransaction = db.transaction((consultationId, symptoms) => {
+    for (const symptom of symptoms) {
+      const clean = String(symptom || '').trim();
+      if (clean) {
+        insertSymptomStmt.run(consultationId, clean);
+      }
+    }
+  });
+
+  function addSymptoms(consultationId, symptoms) {
+    if (!consultationId) throw new Error('consultationId is required');
+    const list = Array.isArray(symptoms) ? symptoms : [symptoms];
+    addSymptomsTransaction(consultationId, list);
+  }
+
+  function getSymptomsByConsultation(consultationId) {
+    if (!consultationId) return [];
+    return getSymptomsByConsultationStmt.all(consultationId);
+  }
+
   function close() {
     db.close();
   }
 
   return {
     db, dbPath,
-    getPatientByPhone, upsertPatientField,
+    getPatientByPhone, createNewPatient, upsertPatientField,
     markFormCompleted, isFormCompleted,
-    createConsultation, getLastConsultation, close,
+    createConsultation, getLastConsultation,
+    addSymptoms, getSymptomsByConsultation,
+    close,
   };
 }
 

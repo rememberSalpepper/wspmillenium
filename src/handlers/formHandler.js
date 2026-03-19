@@ -13,6 +13,7 @@ const {
   validatePhone,
   validateAddress,
 } = require('../validators');
+const { log } = require('../logger');
 
 const FORM_FIELDS = [
   {
@@ -240,7 +241,13 @@ function buildPendingFieldsMessage({ patient, invalidKeys = [] }) {
 function createFormHandler({ database, patientFlowStore, geminiService }) {
   async function extractFormData(prompt) {
     const labeledFields = extractLabeledFields(prompt);
-    if (countExtractedFields(labeledFields) > 0) {
+    const labeledCount = countExtractedFields(labeledFields);
+
+    if (labeledCount > 0) {
+      log('info', 'form.extraction_labeled', {
+        fieldsFound: labeledCount,
+        keys: Object.keys(labeledFields).filter((k) => labeledFields[k]),
+      });
       return labeledFields;
     }
 
@@ -249,7 +256,23 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
       systemInstruction: buildFormExtractionInstruction(),
     });
 
-    return parseJsonResponse(rawResponse) || {};
+    const parsed = parseJsonResponse(rawResponse);
+
+    if (!parsed || countExtractedFields(parsed) === 0) {
+      log('warn', 'form.extraction_failed', {
+        promptPreview: String(prompt || '').slice(0, 200),
+        rawResponsePreview: String(rawResponse || '').slice(0, 300),
+        parsed,
+      });
+      return {};
+    }
+
+    log('info', 'form.extraction_gemini', {
+      fieldsFound: countExtractedFields(parsed),
+      keys: Object.keys(parsed).filter((k) => parsed[k]),
+    });
+
+    return parsed;
   }
 
   async function handleFieldCollection({ phone, prompt, state }) {
@@ -265,6 +288,11 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
 
       const validation = field.validate(rawValue);
       if (!validation.valid || !validation.value) {
+        log('warn', 'form.field_validation_failed', {
+          phone,
+          field: field.key,
+          rawValue: String(rawValue).slice(0, 100),
+        });
         invalidKeys.push(field.key);
         continue;
       }
@@ -272,6 +300,14 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
       database.upsertPatientField(phone, field.key, validation.value);
       savedKeys.push(field.key);
     }
+
+    log('info', 'form.field_collection_result', {
+      phone,
+      state,
+      savedKeys,
+      invalidKeys,
+      extractedKeys: Object.keys(extractedFields || {}).filter((k) => extractedFields[k]),
+    });
 
     const patient = database.getPatientByPhone(phone);
     const nextState = patientFlowStore.syncState(phone, patient);

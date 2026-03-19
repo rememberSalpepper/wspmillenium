@@ -3,6 +3,34 @@ const { log } = require('../logger');
 const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
 const { FLOW_STATES, isFormCollectionState } = require('../stores/patientFlowStore');
 
+const RESTART_PATTERNS = [
+  /\bformulario\b/,
+  /\breinicia/,
+  /\brenuev/,
+  /\bempezar de nuevo\b/,
+  /\bempezar desde cero\b/,
+  /\bde nuevo\b/,
+  /\bdesde cero\b/,
+  /\bnuevo paciente\b/,
+  /\bnueva consulta\b/,
+  /\botra consulta\b/,
+  /\breset/,
+];
+
+function normalizeForPatterns(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function wantsRestart(prompt) {
+  const normalized = normalizeForPatterns(prompt);
+  return RESTART_PATTERNS.some((p) => p.test(normalized));
+}
+
 const FALLBACK_QUOTA_MESSAGE =
   'Se agotó la cuota de la cuenta API de IA. Estamos en pruebas. Intenta nuevamente en un rato.';
 
@@ -492,9 +520,55 @@ function createWebhookRouter({
       return;
     }
 
+    if (flowState === FLOW_STATES.COMPLETED) {
+      if (wantsRestart(prompt)) {
+        log('info', 'flow.restart_new_patient', { from, prompt: previewText(prompt) });
+
+        database.createNewPatient(from);
+        patientFlowStore.setState(from, FLOW_STATES.COLLECTING_RUT);
+
+        let formReply;
+        try {
+          formReply = await formHandler.handleMessage({
+            phone: from,
+            prompt,
+            state: FLOW_STATES.COLLECTING_RUT,
+            patient: database.getPatientByPhone(from),
+          });
+        } catch (formErr) {
+          logError('form.restart_error', formErr, { msgId, from });
+          formReply = {
+            body: config.BOT_WELCOME_MESSAGE,
+            skipWordLimit: true,
+          };
+        }
+
+        const safeFormRestart = applyReplyLimits(formReply?.body, config, {
+          skipWordLimit: Boolean(formReply?.skipWordLimit),
+        });
+
+        await deliverReply({
+          from,
+          msgId,
+          body: safeFormRestart,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.form_restart_sent',
+          errorEvent: 'whatsapp.form_restart_send_error',
+          logData: { batchCount: batch.count },
+        });
+
+        return;
+      }
+
+      log('info', 'flow.completed_new_consultation', { from, prompt: previewText(prompt) });
+      patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
+    }
+
     if (
       flowState === FLOW_STATES.CONSULTATION ||
-      flowState === FLOW_STATES.AWAITING_APPOINTMENT
+      flowState === FLOW_STATES.AWAITING_APPOINTMENT ||
+      flowState === FLOW_STATES.COMPLETED
     ) {
       let consultationReply;
 

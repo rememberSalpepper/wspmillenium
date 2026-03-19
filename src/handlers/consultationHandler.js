@@ -5,6 +5,7 @@ const {
   buildConsultationOrientationPrompt,
 } = require('../botPrompt');
 const { FLOW_STATES } = require('../stores/patientFlowStore');
+const { log } = require('../logger');
 
 const CONSULTATION_PROMPT =
   '¿Cómo se siente? Cuénteme brevemente sus síntomas y el motivo de su consulta 🩺';
@@ -151,7 +152,22 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
       systemInstruction: buildConsultationExtractionInstruction(),
     });
 
-    return parseJsonResponse(rawResponse);
+    const parsed = parseJsonResponse(rawResponse);
+
+    if (!parsed || !parsed.valid) {
+      log('warn', 'consultation.extraction_failed', {
+        promptPreview: String(prompt || '').slice(0, 200),
+        rawResponsePreview: String(rawResponse || '').slice(0, 300),
+        parsed,
+      });
+    } else {
+      log('info', 'consultation.extraction_ok', {
+        sintomasCount: Array.isArray(parsed.sintomas) ? parsed.sintomas.length : 0,
+        hasMotivoConsulta: Boolean(parsed.motivoConsulta),
+      });
+    }
+
+    return parsed;
   }
 
   async function buildDiagnostics({ symptoms, reason }) {
@@ -207,9 +223,16 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
       return { body: CONSULTATION_PROMPT };
     }
 
-    const symptoms = clipText(extracted.sintomas || prompt, 220);
-    const reason = clipText(extracted.motivoConsulta || prompt, 180);
-    const diagnostics = await buildDiagnostics({ symptoms, reason });
+    const symptomsArray = Array.isArray(extracted.sintomas)
+      ? extracted.sintomas.filter((s) => String(s || '').trim())
+      : [];
+
+    const symptomsText = clipText(
+      extracted.sintomasTexto || symptomsArray.join(', ') || prompt,
+      500
+    );
+    const reason = clipText(extracted.motivoConsulta || prompt, 500);
+    const diagnostics = await buildDiagnostics({ symptoms: symptomsText, reason });
 
     patientFlowStore.setState(phone, FLOW_STATES.CONSULTATION_SUMMARY);
 
@@ -221,11 +244,15 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
     const consultationId = database.createConsultation({
       phone,
       patientId: activePatient.id,
-      sintomas: symptoms,
+      sintomas: symptomsText,
       motivo: reason,
       orientacion: diagnostics.raw,
       resumen: summary,
     });
+
+    if (symptomsArray.length > 0) {
+      database.addSymptoms(consultationId, symptomsArray);
+    }
 
     patientFlowStore.setState(phone, FLOW_STATES.AWAITING_APPOINTMENT);
 

@@ -147,10 +147,12 @@ function buildFormExtractionPrompt(userMessage) {
 function buildConsultationExtractionInstruction() {
   return [
     'Analiza un mensaje de un paciente por WhatsApp.',
-    'Extrae sintomas y motivo de consulta solo si el mensaje realmente describe un problema de salud o malestar.',
+    'Extrae cada sintoma individual y el motivo de consulta solo si el mensaje realmente describe un problema de salud o malestar.',
     'Responde solo con JSON valido usando este formato exacto:',
-    '{"sintomas":"texto resumido","motivoConsulta":"texto resumido","valid":true}',
-    'Si no hay sintomas ni motivo de consulta claros, responde {"sintomas":null,"motivoConsulta":null,"valid":false}.',
+    '{"sintomas":["sintoma 1","sintoma 2","sintoma 3"],"sintomasTexto":"resumen breve de todos los sintomas","motivoConsulta":"texto resumido","valid":true}',
+    'El campo "sintomas" es un array con cada sintoma por separado. Incluye todos los que mencione el paciente.',
+    'El campo "sintomasTexto" es un resumen corto de todos los sintomas en una sola frase.',
+    'Si no hay sintomas ni motivo de consulta claros, responde {"sintomas":[],"sintomasTexto":null,"motivoConsulta":null,"valid":false}.',
     'No agregues explicaciones ni markdown.',
   ].join('\n');
 }
