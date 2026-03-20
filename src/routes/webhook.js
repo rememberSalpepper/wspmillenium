@@ -455,15 +455,14 @@ function createWebhookRouter({
 
       log('info', 'flow.reset', { from, deletedPatients: deleted });
 
-      await deliverReply({
-        from,
-        msgId,
-        body: `Datos eliminados ✅ Escribe "hola" para comenzar de nuevo.`,
-        conversationStore,
-        whatsappService,
-        successEvent: 'outbound.reset_sent',
-        errorEvent: 'whatsapp.reset_send_error',
-      });
+      const resetReply = `Datos eliminados ✅\n\n${config.BOT_WELCOME_MESSAGE}`;
+
+      try {
+        await whatsappService.sendText(from, resetReply);
+        log('info', 'outbound.reset_sent', { from, msgId });
+      } catch (waErr) {
+        log('error', 'whatsapp.reset_send_error', { from, message: waErr?.message });
+      }
 
       return;
     }
