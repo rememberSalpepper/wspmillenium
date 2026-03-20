@@ -40,12 +40,12 @@ function createDatabase(config) {
       FOREIGN KEY (patient_id) REFERENCES patients(id)
     );
 
-    CREATE TABLE IF NOT EXISTS consultation_symptoms (
+    CREATE TABLE IF NOT EXISTS consulta_sintomas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      consultation_id INTEGER NOT NULL,
-      symptom TEXT NOT NULL,
+      consulta_id INTEGER NOT NULL,
+      sintoma TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (consultation_id) REFERENCES consultations(id)
+      FOREIGN KEY (consulta_id) REFERENCES consultations(id)
     );
   `);
 
@@ -85,6 +85,18 @@ function createDatabase(config) {
     db.pragma('foreign_keys = ON');
   }
 
+  // Migrate: rename consultation_symptoms → consulta_sintomas if old table exists
+  const oldSymptomsTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='consultation_symptoms'")
+    .get();
+  if (oldSymptomsTable) {
+    db.exec('ALTER TABLE consultation_symptoms RENAME TO consulta_sintomas');
+    try {
+      db.exec('ALTER TABLE consulta_sintomas RENAME COLUMN consultation_id TO consulta_id');
+      db.exec('ALTER TABLE consulta_sintomas RENAME COLUMN symptom TO sintoma');
+    } catch (_) {}
+  }
+
   // Drop the rut unique index if it was created before
   try {
     db.exec('DROP INDEX IF EXISTS idx_patients_rut');
@@ -119,13 +131,13 @@ function createDatabase(config) {
   `);
 
   const insertSymptomStmt = db.prepare(`
-    INSERT INTO consultation_symptoms (consultation_id, symptom)
+    INSERT INTO consulta_sintomas (consulta_id, sintoma)
     VALUES (?, ?)
   `);
 
   const getSymptomsByConsultationStmt = db.prepare(`
-    SELECT id, symptom, created_at FROM consultation_symptoms
-    WHERE consultation_id = ? ORDER BY id ASC
+    SELECT id, sintoma, created_at FROM consulta_sintomas
+    WHERE consulta_id = ? ORDER BY id ASC
   `);
 
   function ensurePatient(phone) {
@@ -247,7 +259,7 @@ function createDatabase(config) {
 
       if (consultationIds.length > 0) {
         const cPlaceholders = consultationIds.map(() => '?').join(',');
-        db.prepare(`DELETE FROM consultation_symptoms WHERE consultation_id IN (${cPlaceholders})`)
+        db.prepare(`DELETE FROM consulta_sintomas WHERE consulta_id IN (${cPlaceholders})`)
           .run(...consultationIds);
       }
 
