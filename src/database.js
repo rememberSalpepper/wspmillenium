@@ -85,17 +85,10 @@ function createDatabase(config) {
     db.pragma('foreign_keys = ON');
   }
 
-  // Migrate: rename consultation_symptoms → consulta_sintomas if old table exists
-  const oldSymptomsTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='consultation_symptoms'")
-    .get();
-  if (oldSymptomsTable) {
-    db.exec('ALTER TABLE consultation_symptoms RENAME TO consulta_sintomas');
-    try {
-      db.exec('ALTER TABLE consulta_sintomas RENAME COLUMN consultation_id TO consulta_id');
-      db.exec('ALTER TABLE consulta_sintomas RENAME COLUMN symptom TO sintoma');
-    } catch (_) {}
-  }
+  // Migrate: drop old consultation_symptoms table if it exists (replaced by consulta_sintomas)
+  try {
+    db.exec('DROP TABLE IF EXISTS consultation_symptoms');
+  } catch (_) {}
 
   // Drop the rut unique index if it was created before
   try {
