@@ -133,6 +133,18 @@ function createDatabase(config) {
     WHERE consulta_id = ? ORDER BY id ASC
   `);
 
+  const updateFieldStmts = Object.fromEntries(
+    ['rut', 'nombre', 'correo', 'telefono', 'direccion'].map((field) => [
+      field,
+      db.prepare(`UPDATE patients SET ${field} = ?, updated_at = datetime('now') WHERE id = ?`),
+    ])
+  );
+
+  const updateAppointmentStatusStmt = db.prepare(`
+    UPDATE consultations SET appointment_status = ?
+    WHERE id = (SELECT id FROM consultations WHERE phone = ? ORDER BY id DESC LIMIT 1)
+  `);
+
   function ensurePatient(phone) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) throw new Error('Phone is required');
@@ -165,11 +177,7 @@ function createDatabase(config) {
 
     const patient = ensurePatient(cleanPhone);
 
-    const stmt = db.prepare(`
-      UPDATE patients SET ${field} = ?, updated_at = datetime('now') WHERE id = ?
-    `);
-
-    stmt.run(String(value || '').trim(), patient.id);
+    updateFieldStmts[field].run(String(value || '').trim(), patient.id);
     return getPatientByPhone(cleanPhone);
   }
 
@@ -270,6 +278,12 @@ function createDatabase(config) {
     return resetPatientTransaction(cleanPhone);
   }
 
+  function updateAppointmentStatus(phone, status) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) throw new Error('Phone is required');
+    updateAppointmentStatusStmt.run(status, cleanPhone);
+  }
+
   function close() {
     db.close();
   }
@@ -278,7 +292,7 @@ function createDatabase(config) {
     db, dbPath,
     getPatientByPhone, createNewPatient, upsertPatientField,
     markFormCompleted, isFormCompleted,
-    createConsultation, getLastConsultation,
+    createConsultation, getLastConsultation, updateAppointmentStatus,
     addSymptoms, getSymptomsByConsultation,
     resetPatient,
     close,

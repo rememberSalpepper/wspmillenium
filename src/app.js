@@ -153,4 +153,5 @@ setInterval(() => {
 module.exports = {
   app,
   config,
+  database,
 };

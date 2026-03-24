@@ -185,11 +185,13 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
   function handleAppointmentResponse({ phone, prompt }) {
     if (isAffirmative(prompt)) {
       patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      database.updateAppointmentStatus(phone, 'confirmed');
       return { body: APPOINTMENT_CONFIRM_MESSAGE };
     }
 
     if (isNegative(prompt)) {
       patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      database.updateAppointmentStatus(phone, 'declined');
       return { body: APPOINTMENT_DECLINE_MESSAGE };
     }
 

@@ -1,4 +1,4 @@
-const { app, config } = require('./src/app');
+const { app, config, database } = require('./src/app');
 const { log } = require('./src/logger');
 
 const server = app.listen(config.PORT, () => {
@@ -13,6 +13,7 @@ function shutdown(signal) {
   log('info', 'server.shutdown_start', { signal });
 
   server.close(() => {
+    database.close();
     log('info', 'server.shutdown_complete', { signal });
     process.exit(0);
   });

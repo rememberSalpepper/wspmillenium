@@ -45,7 +45,12 @@ class InboundBufferStore {
       try {
         await onFlush(batch);
       } catch (err) {
-        // El manejo del error se hace fuera
+        const { log } = require('../logger');
+        log('error', 'inbound_buffer.flush_error', {
+          senderId,
+          message: err?.message,
+          stack: err?.stack,
+        });
       }
     }, this.bufferMs);
   }

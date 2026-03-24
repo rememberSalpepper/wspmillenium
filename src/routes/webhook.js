@@ -11,8 +11,6 @@ const RESTART_PATTERNS = [
   /\bempezar desde cero\b/,
   /\bde nuevo\b/,
   /\bdesde cero\b/,
-  /\bnuevo\b/,
-  /\bnueva\b/,
   /\bnuevo paciente\b/,
   /\bnueva consulta\b/,
   /\botra consulta\b/,
@@ -324,6 +322,10 @@ function createWebhookRouter({
         type,
       });
 
+      try {
+        await whatsappService.markAsReadAndTyping(msgId);
+      } catch (_) {}
+
       const unsupportedReply = getUnsupportedMessageReply(type);
       try {
         await whatsappService.sendText(from, unsupportedReply);
@@ -467,8 +469,7 @@ function createWebhookRouter({
       return;
     }
 
-    const isNewSession = !conversationStore.hasTurns(from) ||
-      (conversationStore.turnCount(from) <= 1);
+    const isNewSession = conversationStore.turnCount(from) <= 1;
     const hasStalePatient = patient?.form_completed && isNewSession && !isFirstInteraction;
 
     if (hasStalePatient && flowState === FLOW_STATES.COMPLETED) {
@@ -494,19 +495,17 @@ function createWebhookRouter({
         return;
       }
 
-      if (!wantsRestart(prompt)) {
-        await deliverReply({
-          from,
-          msgId,
-          body: CONFIRM_IDENTITY_MESSAGE,
-          conversationStore,
-          whatsappService,
-          successEvent: 'outbound.confirm_identity_sent',
-          errorEvent: 'whatsapp.confirm_identity_send_error',
-        });
+      await deliverReply({
+        from,
+        msgId,
+        body: CONFIRM_IDENTITY_MESSAGE,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.confirm_identity_sent',
+        errorEvent: 'whatsapp.confirm_identity_send_error',
+      });
 
-        return;
-      }
+      return;
     }
 
     const automatedReply = getAutomatedReply({
