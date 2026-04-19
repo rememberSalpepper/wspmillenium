@@ -81,6 +81,7 @@ const consultationHandler = createConsultationHandler({
   patientFlowStore,
   geminiService,
   emailService,
+  config,
 });
 
 // Ensure default CRM admin user exists

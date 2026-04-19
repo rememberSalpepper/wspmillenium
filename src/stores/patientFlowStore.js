@@ -9,6 +9,8 @@ const FLOW_STATES = {
   CONSULTATION: 'consultation',
   CONSULTATION_SUMMARY: 'consultation_summary',
   AWAITING_APPOINTMENT: 'awaiting_appointment',
+  SELECTING_APPOINTMENT: 'selecting_appointment',
+  CONFIRMING_APPOINTMENT: 'confirming_appointment',
   COMPLETED: 'completed',
   CONFIRMING_IDENTITY: 'confirming_identity',
 };
@@ -100,16 +102,33 @@ class PatientFlowStore {
     return state;
   }
 
-  setState(phone, state) {
+  setState(phone, state, data) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) return state;
 
-    this.states.set(cleanPhone, {
+    const entry = {
       state,
       lastUpdated: Date.now(),
-    });
+    };
+    if (data !== undefined) {
+      entry.data = data;
+    }
+
+    this.states.set(cleanPhone, entry);
 
     return state;
+  }
+
+  setStateWithData(phone, state, data) {
+    return this.setState(phone, state, data);
+  }
+
+  getStateData(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return null;
+
+    const existing = this.states.get(cleanPhone);
+    return existing?.data || null;
   }
 
   syncState(phone, patient = null) {

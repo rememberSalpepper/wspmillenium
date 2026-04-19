@@ -11,7 +11,13 @@
   <!-- Login -->
   <div id="loginView" class="login-container">
     <div class="login-box">
+      <div class="login-logo">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+      </div>
       <h1>Consultas Millenium</h1>
+      <p class="login-subtitle">Panel de gestion medica</p>
       <form id="loginForm">
         <div class="form-group">
           <label>Usuario</label>
@@ -21,59 +27,200 @@
           <label>Contrasena</label>
           <input type="password" id="loginPass" autocomplete="current-password" required>
         </div>
-        <button type="submit" class="btn btn-primary">Ingresar</button>
+        <button type="submit" class="btn btn-primary btn-block">Ingresar</button>
         <div id="loginError" class="error-msg"></div>
       </form>
     </div>
   </div>
 
   <!-- App -->
-  <div id="appView" class="app-container">
-    <div class="header">
-      <h1>CRM Consultas Millenium</h1>
-      <div class="header-actions">
-        <span class="user-label" id="headerUser"></span>
-        <button class="btn btn-sm btn-outline" id="logoutBtn">Salir</button>
+  <div id="appView" class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+        <span>Millenium</span>
       </div>
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-view="dashboard">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a href="#patients" class="nav-item" data-view="patients">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Pacientes</span>
+        </a>
+        <a href="#calendar" class="nav-item" data-view="calendar">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Calendario</span>
+        </a>
+        <a href="#agenda" class="nav-item" data-view="agenda">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Agenda</span>
+        </a>
+        <a href="#settings" class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Configuracion</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="user-badge" id="headerUser">admin</span>
+        <button class="btn btn-sm btn-ghost" id="logoutBtn">Salir</button>
+      </div>
+    </aside>
+
+    <!-- Mobile header -->
+    <div class="mobile-header" id="mobileHeader">
+      <button class="hamburger" id="hamburgerBtn">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="mobile-title">Millenium CRM</span>
     </div>
 
-    <div class="main-content">
-      <!-- Stats -->
-      <div class="stats-grid" id="statsGrid"></div>
+    <!-- Overlay for mobile sidebar -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-      <!-- Patient List -->
-      <div id="patientListView">
+    <!-- Main content -->
+    <main class="main-content">
+
+      <!-- Dashboard View -->
+      <section id="view-dashboard" class="view">
+        <div class="view-header">
+          <h2>Dashboard</h2>
+          <button class="btn btn-sm btn-outline" id="refreshDashboard">Actualizar</button>
+        </div>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">Citas de hoy</div>
+            <div class="card-body" id="todayAppointments">
+              <p class="text-muted text-sm">Cargando...</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">Proximas citas</div>
+            <div class="card-body" id="upcomingAppointments">
+              <p class="text-muted text-sm">Cargando...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Patients View -->
+      <section id="view-patients" class="view" style="display:none">
+        <div class="view-header">
+          <h2>Pacientes</h2>
+        </div>
         <div class="card">
           <div class="card-header">
-            <span>Pacientes</span>
-            <button class="btn btn-sm btn-outline" id="refreshBtn">Actualizar</button>
+            <input type="text" id="patientSearch" class="search-input" placeholder="Buscar por nombre, RUT o telefono...">
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>RUT</th>
-                <th>Telefono</th>
-                <th>Ultima actualizacion</th>
-              </tr>
-            </thead>
-            <tbody id="patientTableBody"></tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>RUT</th>
+                  <th>Telefono</th>
+                  <th>Ultima actualizacion</th>
+                </tr>
+              </thead>
+              <tbody id="patientTableBody"></tbody>
+            </table>
+          </div>
           <div class="pagination" id="pagination"></div>
         </div>
-      </div>
+      </section>
 
-      <!-- Patient Detail -->
-      <div id="patientDetailView" class="detail-panel">
-        <span class="back-link" id="backToList">Volver a pacientes</span>
-        <div class="card" style="margin-bottom:1rem;">
-          <div class="card-header">Datos del paciente</div>
-          <div class="info-grid" id="patientInfo"></div>
+      <!-- Patient Detail View -->
+      <section id="view-patient-detail" class="view" style="display:none">
+        <div class="view-header">
+          <button class="btn btn-sm btn-ghost" id="backToPatients">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Volver
+          </button>
         </div>
-        <h3 style="font-size:0.95rem;margin-bottom:0.75rem;">Consultas</h3>
+        <div class="card" style="margin-bottom:1.5rem;">
+          <div class="card-header">Datos del paciente</div>
+          <div class="card-body">
+            <div class="info-grid" id="patientInfo"></div>
+          </div>
+        </div>
+        <h3 class="section-title">Consultas</h3>
         <div id="consultationsList"></div>
-      </div>
-    </div>
+      </section>
+
+      <!-- Calendar View -->
+      <section id="view-calendar" class="view" style="display:none">
+        <div class="view-header">
+          <h2>Calendario</h2>
+          <div class="calendar-nav">
+            <button class="btn btn-sm btn-ghost" id="calPrev">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <span id="calMonthLabel" class="cal-month-label"></span>
+            <button class="btn btn-sm btn-ghost" id="calNext">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button class="btn btn-sm btn-outline" id="calToday">Hoy</button>
+          </div>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </section>
+
+      <!-- Agenda View -->
+      <section id="view-agenda" class="view" style="display:none">
+        <div class="view-header">
+          <h2>Agenda</h2>
+          <div class="agenda-nav">
+            <button class="btn btn-sm btn-ghost" id="agendaPrev">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <input type="date" id="agendaDate" class="date-picker">
+            <button class="btn btn-sm btn-ghost" id="agendaNext">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body agenda-timeline" id="agendaTimeline">
+            <p class="text-muted text-sm">Cargando...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings View -->
+      <section id="view-settings" class="view" style="display:none">
+        <div class="view-header">
+          <h2>Configuracion</h2>
+        </div>
+        <div class="card" style="margin-bottom:1.5rem;">
+          <div class="card-header">
+            <span>Horario semanal del doctor</span>
+            <button class="btn btn-sm btn-primary" id="saveSchedule">Guardar horario</button>
+          </div>
+          <div class="card-body" id="scheduleEditor">
+            <p class="text-muted text-sm">Cargando...</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span>Bloqueos de fechas</span>
+          </div>
+          <div class="card-body">
+            <div class="block-form" id="blockForm">
+              <input type="date" id="blockDate" class="date-picker">
+              <input type="text" id="blockReason" placeholder="Motivo (opcional)" class="input-sm">
+              <button class="btn btn-sm btn-primary" id="addBlock">Agregar bloqueo</button>
+            </div>
+            <div id="blocksList"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
   </div>
 
   <script src="app.js"></script>

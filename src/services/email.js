@@ -20,26 +20,37 @@ function createEmailService(config) {
     },
   });
 
-  async function sendAppointmentNotification({ patient, consultation, symptoms }) {
+  async function sendAppointmentNotification({ patient, consultation, symptoms, appointmentDate, appointmentTime }) {
     const symptomList = Array.isArray(symptoms)
       ? symptoms.map((s) => s.sintoma || s).join(', ')
       : '';
 
-    const body = [
-      'Nueva solicitud de cita médica',
+    const lines = [
+      'Nueva cita médica agendada',
       '',
       `Paciente: ${patient?.nombre || '-'}`,
       `RUT: ${patient?.rut || '-'}`,
       `Teléfono: ${patient?.telefono || patient?.phone || '-'}`,
       `Email: ${patient?.correo || '-'}`,
       `Dirección: ${patient?.direccion || '-'}`,
+    ];
+
+    if (appointmentDate) {
+      lines.push('');
+      lines.push(`Fecha cita: ${appointmentDate}`);
+      if (appointmentTime) lines.push(`Hora cita: ${appointmentTime}`);
+    }
+
+    lines.push(
       '',
       `Síntomas: ${consultation?.sintomas || symptomList || '-'}`,
       `Motivo: ${consultation?.motivo_consulta || '-'}`,
       `Orientación: ${consultation?.orientacion || '-'}`,
       '',
       `Fecha solicitud: ${new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' })}`,
-    ].join('\n');
+    );
+
+    const body = lines.join('\n');
 
     try {
       await transporter.sendMail({

@@ -754,6 +754,8 @@ function createWebhookRouter({
     if (
       flowState === FLOW_STATES.CONSULTATION ||
       flowState === FLOW_STATES.AWAITING_APPOINTMENT ||
+      flowState === FLOW_STATES.SELECTING_APPOINTMENT ||
+      flowState === FLOW_STATES.CONFIRMING_APPOINTMENT ||
       flowState === FLOW_STATES.COMPLETED
     ) {
       let consultationReply;

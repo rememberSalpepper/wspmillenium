@@ -100,6 +100,11 @@ const config = {
   CRM_USER: process.env.CRM_USER || 'admin',
   CRM_PASS: process.env.CRM_PASS || 'admin123',
   CRM_JWT_SECRET: process.env.CRM_JWT_SECRET || require('crypto').randomBytes(32).toString('hex'),
+
+  // Appointments
+  APPOINTMENT_SLOT_DURATION: toNumber(process.env.APPOINTMENT_SLOT_DURATION, 30),
+  APPOINTMENT_LOOKAHEAD_DAYS: toNumber(process.env.APPOINTMENT_LOOKAHEAD_DAYS, 14),
+  APPOINTMENT_SLOTS_TO_SHOW: toNumber(process.env.APPOINTMENT_SLOTS_TO_SHOW, 5),
 };
 
 const requiredEnv = [

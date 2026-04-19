@@ -35,8 +35,14 @@ function createCrmRouter({ config, database }) {
     res.json(stats);
   });
 
-  // List patients (paginated)
+  // Search / list patients (paginated)
   router.get('/patients', requireAuth, (req, res) => {
+    const search = req.query.search;
+    if (search && search.trim()) {
+      const patients = database.searchPatients(search.trim());
+      res.json({ patients, total: patients.length });
+      return;
+    }
     const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 100);
     const offset = Math.max(0, parseInt(req.query.offset) || 0);
     const result = database.getAllPatients({ limit, offset });
@@ -80,6 +86,96 @@ function createCrmRouter({ config, database }) {
 
     const updated = database.getConsultationById(id);
     res.json(updated);
+  });
+
+  // ─── Schedule endpoints ───────────────────────────────────────────
+
+  // Get weekly schedule
+  router.get('/schedule', requireAuth, (req, res) => {
+    const schedule = database.getWeeklySchedule();
+    res.json(schedule);
+  });
+
+  // Get all date blocks (must be before /schedule/:id)
+  router.get('/schedule/blocks', requireAuth, (req, res) => {
+    res.json(database.getDateBlocks());
+  });
+
+  // Add date block
+  router.post('/schedule/blocks', requireAuth, (req, res) => {
+    const { block_date, start_time, end_time, block_type, reason } = req.body || {};
+    if (!block_date) return res.status(400).json({ error: 'block_date_required' });
+    const id = database.addDateBlock(block_date, start_time, end_time, block_type, reason);
+    res.json({ id });
+  });
+
+  // Remove date block
+  router.delete('/schedule/blocks/:id', requireAuth, (req, res) => {
+    database.removeDateBlock(parseInt(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // Replace entire weekly schedule
+  router.put('/schedule', requireAuth, (req, res) => {
+    const { blocks } = req.body || {};
+    if (!Array.isArray(blocks)) return res.status(400).json({ error: 'blocks_required' });
+    database.replaceWeeklySchedule(blocks);
+    res.json(database.getWeeklySchedule());
+  });
+
+  // Add schedule block
+  router.post('/schedule', requireAuth, (req, res) => {
+    const { day_of_week, start_time, end_time, slot_duration_min } = req.body || {};
+    if (day_of_week === undefined || !start_time || !end_time) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+    const id = database.addScheduleBlock(day_of_week, start_time, end_time, slot_duration_min || 30);
+    res.json({ id });
+  });
+
+  // Delete schedule block
+  router.delete('/schedule/:id', requireAuth, (req, res) => {
+    database.deleteScheduleBlock(parseInt(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // ─── Appointment endpoints ──────────────────────────────────────
+
+  // List appointments (with optional date range filter)
+  router.get('/appointments', requireAuth, (req, res) => {
+    const { from, to } = req.query;
+    if (from && to) {
+      res.json(database.getAppointmentsByDateRange(from, to));
+    } else {
+      res.json(database.getUpcomingAppointments());
+    }
+  });
+
+  // Get appointments for a specific day
+  router.get('/appointments/day/:date', requireAuth, (req, res) => {
+    res.json(database.getAppointmentsByDate(req.params.date));
+  });
+
+  // Today's appointments
+  router.get('/appointments/today', requireAuth, (req, res) => {
+    res.json(database.getTodayAppointments());
+  });
+
+  // Update appointment (status, notes, reschedule)
+  router.patch('/appointments/:id', requireAuth, (req, res) => {
+    const id = parseInt(req.params.id);
+    const apt = database.getAppointmentById(id);
+    if (!apt) return res.status(404).json({ error: 'not_found' });
+
+    const { status, notes, appointment_date, appointment_time } = req.body || {};
+
+    if (appointment_date && appointment_time) {
+      database.rescheduleAppointment(id, appointment_date, appointment_time);
+    } else if (status) {
+      database.updateAppointment(id, status, notes !== undefined ? notes : apt.notes);
+    }
+
+    res.json(database.getAppointmentById(id));
   });
 
   return router;

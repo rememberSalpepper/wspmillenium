@@ -138,7 +138,51 @@ function buildConsultationSummary({ patient, diagnosticsText }) {
   ].join('\n');
 }
 
-function createConsultationHandler({ database, patientFlowStore, geminiService, emailService }) {
+function formatSlotDate(slot) {
+  const dayAbbrev = {
+    Domingo: 'Dom',
+    Lunes: 'Lun',
+    Martes: 'Mar',
+    Miercoles: 'Mie',
+    Jueves: 'Jue',
+    Viernes: 'Vie',
+    Sabado: 'Sab',
+  };
+  const [, month, day] = slot.date.split('-');
+  const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const abbrev = dayAbbrev[slot.dayLabel] || slot.dayLabel;
+  const monthNum = parseInt(month, 10);
+  const dayNum = parseInt(day, 10);
+  return `${abbrev} ${dayNum} ${monthNames[monthNum]} - ${slot.time}`;
+}
+
+function formatSlotDateFull(slot) {
+  const [, month, day] = slot.date.split('-');
+  const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const monthNum = parseInt(month, 10);
+  const dayNum = parseInt(day, 10);
+  const [year] = slot.date.split('-');
+  return `${slot.dayLabel} ${dayNum} ${monthNames[monthNum]} ${year}`;
+}
+
+function buildSlotsMessage(slots) {
+  const lines = ['Horarios disponibles:', ''];
+  slots.forEach((slot, i) => {
+    lines.push(`${i + 1}) ${formatSlotDate(slot)}`);
+  });
+  lines.push('');
+  lines.push('Responda con el numero de la opcion.');
+  return lines.join('\n');
+}
+
+function getTodayStr() {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
+}
+
+function createConsultationHandler({ database, patientFlowStore, geminiService, emailService, config }) {
   async function extractConsultationDetails(prompt) {
     const rawResponse = await geminiService.generateText({
       prompt: buildConsultationExtractionPrompt(prompt),
@@ -177,23 +221,19 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
   function handleAppointmentResponse({ phone, prompt }) {
     if (isAffirmative(prompt)) {
-      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
-      database.updateAppointmentStatus(phone, 'confirmed');
+      const slotsToShow = (config && config.APPOINTMENT_SLOTS_TO_SHOW) || 5;
+      const slotDuration = (config && config.APPOINTMENT_SLOT_DURATION) || 30;
+      const slots = database.getAvailableSlots(getTodayStr(), slotsToShow, slotDuration);
 
-      // Fire-and-forget email notification
-      if (emailService) {
-        const patient = database.getPatientByPhone(phone);
-        const consultation = database.getLastConsultation(phone);
-        const symptoms = consultation ? database.getSymptomsByConsultation(consultation.id) : [];
-
-        emailService.sendAppointmentNotification({ patient, consultation, symptoms })
-          .then((sent) => {
-            if (sent && consultation) database.markEmailNotified(consultation.id);
-          })
-          .catch((err) => log('error', 'email.appointment_trigger_failed', { phone, error: err?.message }));
+      if (!slots || slots.length === 0) {
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+        return {
+          body: 'No hay horarios disponibles en las proximas semanas. Nos pondremos en contacto.',
+        };
       }
 
-      return { body: APPOINTMENT_CONFIRM_MESSAGE };
+      patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_APPOINTMENT, { slots });
+      return { body: buildSlotsMessage(slots), skipWordLimit: true };
     }
 
     if (isNegative(prompt)) {
@@ -203,13 +243,153 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     }
 
     return {
-      body: 'Responda "sí" si desea agendar una hora con el doctor, o "no" si prefiere no agendar por ahora 😊',
+      body: 'Responda "si" si desea agendar una hora con el doctor, o "no" si prefiere no agendar por ahora.',
+    };
+  }
+
+  function handleSelectingAppointment({ phone, prompt }) {
+    const stateData = patientFlowStore.getStateData(phone);
+    const slots = stateData?.slots || [];
+
+    if (slots.length === 0) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: 'Ocurrio un error. Nos pondremos en contacto para agendar su hora.' };
+    }
+
+    const trimmed = String(prompt || '').trim();
+    const num = parseInt(trimmed, 10);
+
+    if (Number.isNaN(num) || num < 1 || num > slots.length) {
+      return { body: buildSlotsMessage(slots), skipWordLimit: true };
+    }
+
+    const selectedSlot = slots[num - 1];
+
+    patientFlowStore.setStateWithData(phone, FLOW_STATES.CONFIRMING_APPOINTMENT, {
+      slots,
+      selectedSlot,
+    });
+
+    const confirmMsg = [
+      `Ha seleccionado: ${formatSlotDate(selectedSlot)}`,
+      'Confirma esta hora? (si/no)',
+    ].join('\n');
+
+    return { body: confirmMsg };
+  }
+
+  function handleConfirmingAppointment({ phone, prompt }) {
+    const stateData = patientFlowStore.getStateData(phone);
+    const selectedSlot = stateData?.selectedSlot;
+    const slots = stateData?.slots || [];
+
+    if (!selectedSlot) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: 'Ocurrio un error. Nos pondremos en contacto para agendar su hora.' };
+    }
+
+    const normalized = normalizeText(prompt);
+    const wantsOther = /\botra\b|\botra hora\b|\bcambiar\b/.test(normalized);
+
+    if (isNegative(prompt) || wantsOther) {
+      // Re-generate slots in case availability changed
+      const slotsToShow = (config && config.APPOINTMENT_SLOTS_TO_SHOW) || 5;
+      const slotDuration = (config && config.APPOINTMENT_SLOT_DURATION) || 30;
+      const freshSlots = database.getAvailableSlots(getTodayStr(), slotsToShow, slotDuration);
+
+      if (!freshSlots || freshSlots.length === 0) {
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+        return {
+          body: 'No hay horarios disponibles en las proximas semanas. Nos pondremos en contacto.',
+        };
+      }
+
+      patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_APPOINTMENT, { slots: freshSlots });
+      return { body: buildSlotsMessage(freshSlots), skipWordLimit: true };
+    }
+
+    if (isAffirmative(prompt)) {
+      const patient = database.getPatientByPhone(phone);
+      const consultation = database.getLastConsultation(phone);
+
+      const result = database.createAppointment({
+        consultationId: consultation?.id || null,
+        patientId: patient?.id || null,
+        phone,
+        date: selectedSlot.date,
+        time: selectedSlot.time,
+        duration: (config && config.APPOINTMENT_SLOT_DURATION) || 30,
+      });
+
+      if (result.conflict) {
+        // Slot was taken, re-generate
+        log('info', 'appointment.conflict', { phone, slot: selectedSlot });
+        const slotsToShow = (config && config.APPOINTMENT_SLOTS_TO_SHOW) || 5;
+        const slotDuration = (config && config.APPOINTMENT_SLOT_DURATION) || 30;
+        const freshSlots = database.getAvailableSlots(getTodayStr(), slotsToShow, slotDuration);
+
+        if (!freshSlots || freshSlots.length === 0) {
+          patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+          return {
+            body: 'Lo sentimos, ese horario ya no esta disponible y no hay mas horarios. Nos pondremos en contacto.',
+          };
+        }
+
+        patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_APPOINTMENT, { slots: freshSlots });
+        return {
+          body: `Lo sentimos, ese horario ya no esta disponible. Elija otro:\n\n${buildSlotsMessage(freshSlots)}`,
+          skipWordLimit: true,
+        };
+      }
+
+      // Success
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      if (consultation) {
+        database.updateAppointmentStatus(phone, 'confirmed');
+      }
+
+      // Fire-and-forget email notification
+      if (emailService) {
+        const symptoms = consultation ? database.getSymptomsByConsultation(consultation.id) : [];
+
+        emailService.sendAppointmentNotification({
+            patient, consultation, symptoms,
+            appointmentDate: selectedSlot.date,
+            appointmentTime: selectedSlot.time,
+          })
+          .then((sent) => {
+            if (sent && consultation) database.markEmailNotified(consultation.id);
+          })
+          .catch((err) => log('error', 'email.appointment_trigger_failed', { phone, error: err?.message }));
+      }
+
+      const confirmBody = [
+        'Su hora quedo agendada:',
+        `Fecha: ${formatSlotDateFull(selectedSlot)}`,
+        `Hora: ${selectedSlot.time}`,
+        '',
+        'Si necesita cancelar o reagendar, escribanos.',
+      ].join('\n');
+
+      return { body: confirmBody, skipWordLimit: true };
+    }
+
+    return {
+      body: 'Responda "si" para confirmar la hora, o "no" para ver otras opciones.',
     };
   }
 
   async function handleMessage({ phone, prompt, patient }) {
     const activePatient = patient || database.getPatientByPhone(phone);
     const currentState = patientFlowStore.getState(phone);
+
+    if (currentState === FLOW_STATES.CONFIRMING_APPOINTMENT) {
+      return handleConfirmingAppointment({ phone, prompt });
+    }
+
+    if (currentState === FLOW_STATES.SELECTING_APPOINTMENT) {
+      return handleSelectingAppointment({ phone, prompt });
+    }
 
     if (currentState === FLOW_STATES.AWAITING_APPOINTMENT) {
       return handleAppointmentResponse({ phone, prompt });

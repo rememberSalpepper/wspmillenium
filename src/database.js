@@ -112,6 +112,59 @@ function createDatabase(config) {
     )
   `);
 
+  // Appointment scheduling tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS doctor_schedule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_of_week INTEGER NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      slot_duration_min INTEGER DEFAULT 30,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS schedule_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      block_date TEXT NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      block_type TEXT DEFAULT 'blocked',
+      reason TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS appointments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      consultation_id INTEGER,
+      patient_id INTEGER NOT NULL,
+      phone TEXT NOT NULL,
+      appointment_date TEXT NOT NULL,
+      appointment_time TEXT NOT NULL,
+      duration_min INTEGER DEFAULT 30,
+      status TEXT DEFAULT 'scheduled',
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (consultation_id) REFERENCES consultations(id),
+      FOREIGN KEY (patient_id) REFERENCES patients(id)
+    )
+  `);
+
+  // Seed default doctor schedule if empty
+  const scheduleCount = db.prepare('SELECT COUNT(*) as total FROM doctor_schedule').get().total;
+  if (scheduleCount === 0) {
+    const seedSchedule = db.transaction(() => {
+      const ins = db.prepare('INSERT INTO doctor_schedule (day_of_week, start_time, end_time) VALUES (?, ?, ?)');
+      for (let day = 1; day <= 5; day++) {
+        ins.run(day, '09:00', '13:00');
+        ins.run(day, '15:00', '18:00');
+      }
+      ins.run(6, '09:00', '13:00');
+    });
+    seedSchedule();
+  }
+
   const getPatientByPhoneStmt = db.prepare(`
     SELECT * FROM patients WHERE phone = ? ORDER BY updated_at DESC LIMIT 1
   `);
@@ -194,8 +247,85 @@ function createDatabase(config) {
       (SELECT COUNT(*) FROM consultations WHERE status = 'open') as openConsultations,
       (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'confirmed') as confirmedAppointments,
       (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'pending') as pendingAppointments,
-      (SELECT COUNT(*) FROM consultations) as totalConsultations
+      (SELECT COUNT(*) FROM consultations) as totalConsultations,
+      (SELECT COUNT(*) FROM appointments WHERE appointment_date = date('now') AND status != 'cancelled') as todayAppointments,
+      (SELECT COUNT(*) FROM appointments WHERE appointment_date > date('now') AND status = 'scheduled') as upcomingAppointments
   `);
+
+  // --- Schedule prepared statements ---
+  const getWeeklyScheduleStmt = db.prepare(
+    'SELECT * FROM doctor_schedule WHERE is_active = 1 ORDER BY day_of_week, start_time'
+  );
+  const insertScheduleBlockStmt = db.prepare(
+    'INSERT INTO doctor_schedule (day_of_week, start_time, end_time, slot_duration_min) VALUES (?, ?, ?, ?)'
+  );
+  const updateScheduleBlockStmt = db.prepare(
+    'UPDATE doctor_schedule SET day_of_week = ?, start_time = ?, end_time = ?, slot_duration_min = ? WHERE id = ?'
+  );
+  const deactivateScheduleBlockStmt = db.prepare(
+    'UPDATE doctor_schedule SET is_active = 0 WHERE id = ?'
+  );
+  const activateScheduleBlockStmt = db.prepare(
+    'UPDATE doctor_schedule SET is_active = 1 WHERE id = ?'
+  );
+  const deleteScheduleBlockStmt = db.prepare(
+    'DELETE FROM doctor_schedule WHERE id = ?'
+  );
+  const clearWeeklyScheduleStmt = db.prepare(
+    'DELETE FROM doctor_schedule'
+  );
+
+  // --- Date blocks prepared statements ---
+  const getDateBlocksStmt = db.prepare(
+    'SELECT * FROM schedule_blocks ORDER BY block_date, start_time'
+  );
+  const getDateBlocksByDateStmt = db.prepare(
+    'SELECT * FROM schedule_blocks WHERE block_date = ?'
+  );
+  const insertDateBlockStmt = db.prepare(
+    'INSERT INTO schedule_blocks (block_date, start_time, end_time, block_type, reason) VALUES (?, ?, ?, ?, ?)'
+  );
+  const deleteDateBlockStmt = db.prepare(
+    'DELETE FROM schedule_blocks WHERE id = ?'
+  );
+
+  // --- Appointment prepared statements ---
+  const insertAppointmentStmt = db.prepare(`
+    INSERT INTO appointments (consultation_id, patient_id, phone, appointment_date, appointment_time, duration_min, status, notes)
+    VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
+  `);
+  const getAppointmentByIdStmt = db.prepare(
+    'SELECT * FROM appointments WHERE id = ?'
+  );
+  const getAppointmentsByDateStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date = ? AND a.status != 'cancelled' ORDER BY a.appointment_time"
+  );
+  const getAppointmentsByDateRangeStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date >= ? AND a.appointment_date <= ? AND a.status != 'cancelled' ORDER BY a.appointment_date, a.appointment_time"
+  );
+  const updateAppointmentStmt = db.prepare(
+    "UPDATE appointments SET status = ?, notes = ?, updated_at = datetime('now') WHERE id = ?"
+  );
+  const rescheduleAppointmentStmt = db.prepare(
+    "UPDATE appointments SET appointment_date = ?, appointment_time = ?, status = 'scheduled', updated_at = datetime('now') WHERE id = ?"
+  );
+  const getTodayAppointmentsStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut, p.telefono FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date = date('now') AND a.status != 'cancelled' ORDER BY a.appointment_time"
+  );
+  const getUpcomingAppointmentsStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date >= date('now') AND a.status = 'scheduled' ORDER BY a.appointment_date, a.appointment_time LIMIT 20"
+  );
+  const getBookedSlotsForDateStmt = db.prepare(
+    "SELECT appointment_time, duration_min FROM appointments WHERE appointment_date = ? AND status != 'cancelled'"
+  );
+  const getScheduleForDayStmt = db.prepare(
+    'SELECT * FROM doctor_schedule WHERE day_of_week = ? AND is_active = 1 ORDER BY start_time'
+  );
+
+  // --- Search patients ---
+  const searchPatientsStmt = db.prepare(
+    "SELECT * FROM patients WHERE form_completed = 1 AND (nombre LIKE ? OR rut LIKE ? OR phone LIKE ? OR telefono LIKE ?) ORDER BY updated_at DESC LIMIT ?"
+  );
 
   function ensurePatient(phone) {
     const cleanPhone = String(phone || '').trim();
@@ -372,6 +502,203 @@ function createDatabase(config) {
     return getDashboardStatsStmt.get();
   }
 
+  // --- Schedule functions ---
+
+  function getWeeklySchedule() {
+    return getWeeklyScheduleStmt.all();
+  }
+
+  function addScheduleBlock(dayOfWeek, startTime, endTime, slotDuration = 30) {
+    const result = insertScheduleBlockStmt.run(dayOfWeek, startTime, endTime, slotDuration);
+    return result.lastInsertRowid;
+  }
+
+  function updateScheduleBlock(id, dayOfWeek, startTime, endTime, slotDuration = 30) {
+    updateScheduleBlockStmt.run(dayOfWeek, startTime, endTime, slotDuration, id);
+  }
+
+  function deactivateScheduleBlock(id) {
+    deactivateScheduleBlockStmt.run(id);
+  }
+
+  function activateScheduleBlock(id) {
+    activateScheduleBlockStmt.run(id);
+  }
+
+  function deleteScheduleBlock(id) {
+    deleteScheduleBlockStmt.run(id);
+  }
+
+  function replaceWeeklySchedule(blocks) {
+    const tx = db.transaction(() => {
+      clearWeeklyScheduleStmt.run();
+      const ins = db.prepare('INSERT INTO doctor_schedule (day_of_week, start_time, end_time, slot_duration_min) VALUES (?, ?, ?, ?)');
+      for (const b of blocks) {
+        ins.run(b.day_of_week, b.start_time, b.end_time, b.slot_duration_min || 30);
+      }
+    });
+    tx();
+  }
+
+  // --- Date block functions ---
+
+  function getDateBlocks() {
+    return getDateBlocksStmt.all();
+  }
+
+  function addDateBlock(blockDate, startTime, endTime, blockType = 'blocked', reason = '') {
+    const result = insertDateBlockStmt.run(blockDate, startTime || null, endTime || null, blockType, reason || null);
+    return result.lastInsertRowid;
+  }
+
+  function removeDateBlock(id) {
+    deleteDateBlockStmt.run(id);
+  }
+
+  // --- Appointment functions ---
+
+  const createAppointmentTx = db.transaction((data) => {
+    const { consultationId, patientId, phone, date, time, duration = 30, notes } = data;
+    // Check for conflicts
+    const booked = getBookedSlotsForDateStmt.all(date);
+    const newStart = timeToMinutes(time);
+    const newEnd = newStart + duration;
+    for (const slot of booked) {
+      const sStart = timeToMinutes(slot.appointment_time);
+      const sEnd = sStart + (slot.duration_min || 30);
+      if (newStart < sEnd && newEnd > sStart) {
+        return { conflict: true };
+      }
+    }
+    const result = insertAppointmentStmt.run(
+      consultationId || null, patientId, phone, date, time, duration, notes || null
+    );
+    return { conflict: false, id: result.lastInsertRowid };
+  });
+
+  function createAppointment(data) {
+    return createAppointmentTx(data);
+  }
+
+  function getAppointmentById(id) {
+    return getAppointmentByIdStmt.get(id) || null;
+  }
+
+  function getAppointmentsByDate(date) {
+    return getAppointmentsByDateStmt.all(date);
+  }
+
+  function getAppointmentsByDateRange(from, to) {
+    return getAppointmentsByDateRangeStmt.all(from, to);
+  }
+
+  function updateAppointment(id, status, notes) {
+    updateAppointmentStmt.run(status, notes || null, id);
+  }
+
+  function rescheduleAppointment(id, newDate, newTime) {
+    rescheduleAppointmentStmt.run(newDate, newTime, id);
+  }
+
+  function getTodayAppointments() {
+    return getTodayAppointmentsStmt.all();
+  }
+
+  function getUpcomingAppointments() {
+    return getUpcomingAppointmentsStmt.all();
+  }
+
+  // --- Available slots algorithm ---
+
+  function timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  function minutesToTime(m) {
+    const h = Math.floor(m / 60);
+    const min = m % 60;
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  }
+
+  function getAvailableSlots(fromDate, count = 5, slotDuration = 30) {
+    const slots = [];
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+    const maxDays = 14;
+
+    const start = new Date(fromDate + 'T00:00:00');
+    const now = new Date();
+
+    for (let d = 0; d < maxDays && slots.length < count; d++) {
+      const current = new Date(start);
+      current.setDate(current.getDate() + d);
+
+      const dateStr = current.toISOString().split('T')[0];
+      const dayOfWeek = current.getDay(); // 0=Sun
+
+      // Get schedule blocks for this day of week
+      const scheduleBlocks = getScheduleForDayStmt.all(dayOfWeek);
+      if (scheduleBlocks.length === 0) continue;
+
+      // Get date-specific blocks
+      const dateBlocks = getDateBlocksByDateStmt.all(dateStr);
+      const isFullDayBlocked = dateBlocks.some((b) => !b.start_time && !b.end_time);
+      if (isFullDayBlocked) continue;
+
+      // Get already booked slots
+      const booked = getBookedSlotsForDateStmt.all(dateStr);
+
+      for (const block of scheduleBlocks) {
+        const blockStart = timeToMinutes(block.start_time);
+        const blockEnd = timeToMinutes(block.end_time);
+        const dur = slotDuration || block.slot_duration_min || 30;
+
+        for (let t = blockStart; t + dur <= blockEnd && slots.length < count; t += dur) {
+          const slotTime = minutesToTime(t);
+
+          // Skip past slots for today
+          if (dateStr === now.toISOString().split('T')[0]) {
+            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+            if (t <= nowMinutes) continue;
+          }
+
+          // Check date-specific blocks
+          const slotEnd = t + dur;
+          const isBlocked = dateBlocks.some((b) => {
+            if (!b.start_time || !b.end_time) return false;
+            const bStart = timeToMinutes(b.start_time);
+            const bEnd = timeToMinutes(b.end_time);
+            return t < bEnd && slotEnd > bStart;
+          });
+          if (isBlocked) continue;
+
+          // Check existing bookings
+          const isBooked = booked.some((b) => {
+            const bStart = timeToMinutes(b.appointment_time);
+            const bEnd = bStart + (b.duration_min || 30);
+            return t < bEnd && slotEnd > bStart;
+          });
+          if (isBooked) continue;
+
+          slots.push({
+            date: dateStr,
+            time: slotTime,
+            dayLabel: dayNames[dayOfWeek],
+          });
+        }
+      }
+    }
+
+    return slots;
+  }
+
+  // --- Search patients ---
+
+  function searchPatients(query, limit = 20) {
+    const q = '%' + String(query || '').trim() + '%';
+    return searchPatientsStmt.all(q, q, q, q, limit);
+  }
+
   // --- CRM auth ---
 
   function hashPassword(password) {
@@ -417,9 +744,20 @@ function createDatabase(config) {
     // CRM
     updateConsultationStatus, updateConsultationNotes, markEmailNotified,
     getAllPatients, getConsultationsByPatient, getConsultationById,
-    getDashboardStats,
+    getDashboardStats, searchPatients,
     getCrmUser, createCrmUser, ensureDefaultCrmUser,
     verifyPassword,
+    // Schedule
+    getWeeklySchedule, addScheduleBlock, updateScheduleBlock,
+    deactivateScheduleBlock, activateScheduleBlock, deleteScheduleBlock,
+    replaceWeeklySchedule,
+    // Date blocks
+    getDateBlocks, addDateBlock, removeDateBlock,
+    // Appointments
+    createAppointment, getAppointmentById, getAppointmentsByDate,
+    getAppointmentsByDateRange, updateAppointment, rescheduleAppointment,
+    getTodayAppointments, getUpcomingAppointments,
+    getAvailableSlots,
     close,
   };
 }
