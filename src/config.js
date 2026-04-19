@@ -87,6 +87,19 @@ const config = {
   DB_PATH: process.env.DB_PATH || path.join(process.cwd(), 'data', 'bot.db'),
 
   IGNORE_SELF_MESSAGES: toBoolean(process.env.IGNORE_SELF_MESSAGES, true),
+
+  // SMTP / Email
+  SMTP_HOST: process.env.SMTP_HOST || '',
+  SMTP_PORT: toNumber(process.env.SMTP_PORT, 587),
+  SMTP_USER: process.env.SMTP_USER || '',
+  SMTP_PASS: process.env.SMTP_PASS || '',
+  SMTP_SECURE: toBoolean(process.env.SMTP_SECURE, false),
+  NOTIFY_EMAIL: process.env.NOTIFY_EMAIL || '',
+
+  // CRM
+  CRM_USER: process.env.CRM_USER || 'admin',
+  CRM_PASS: process.env.CRM_PASS || 'admin123',
+  CRM_JWT_SECRET: process.env.CRM_JWT_SECRET || require('crypto').randomBytes(32).toString('hex'),
 };
 
 const requiredEnv = [

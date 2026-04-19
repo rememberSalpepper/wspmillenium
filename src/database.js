@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
 const PATIENT_FIELDS = new Set(['rut', 'nombre', 'correo', 'telefono', 'direccion']);
@@ -95,6 +96,22 @@ function createDatabase(config) {
     db.exec('DROP INDEX IF EXISTS idx_patients_rut');
   } catch (_) {}
 
+  // Migration: add new columns for CRM / email features
+  try { db.exec("ALTER TABLE consultations ADD COLUMN status TEXT DEFAULT 'open'"); } catch (_) {}
+  try { db.exec('ALTER TABLE consultations ADD COLUMN notes TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE consultations ADD COLUMN email_notified INTEGER DEFAULT 0'); } catch (_) {}
+  try { db.exec('ALTER TABLE consultations ADD COLUMN email_notified_at TEXT'); } catch (_) {}
+
+  // CRM users table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS crm_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   const getPatientByPhoneStmt = db.prepare(`
     SELECT * FROM patients WHERE phone = ? ORDER BY updated_at DESC LIMIT 1
   `);
@@ -143,6 +160,41 @@ function createDatabase(config) {
   const updateAppointmentStatusStmt = db.prepare(`
     UPDATE consultations SET appointment_status = ?
     WHERE id = (SELECT id FROM consultations WHERE phone = ? ORDER BY id DESC LIMIT 1)
+  `);
+
+  // CRM prepared statements
+  const updateConsultationStatusStmt = db.prepare(
+    'UPDATE consultations SET status = ? WHERE id = ?'
+  );
+  const updateConsultationNotesStmt = db.prepare(
+    'UPDATE consultations SET notes = ? WHERE id = ?'
+  );
+  const markEmailNotifiedStmt = db.prepare(
+    "UPDATE consultations SET email_notified = 1, email_notified_at = datetime('now') WHERE id = ?"
+  );
+  const getAllPatientsStmt = db.prepare(
+    'SELECT * FROM patients WHERE form_completed = 1 ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+  );
+  const countPatientsStmt = db.prepare(
+    'SELECT COUNT(*) as total FROM patients WHERE form_completed = 1'
+  );
+  const getPatientByIdStmt = db.prepare('SELECT * FROM patients WHERE id = ?');
+  const getConsultationsByPatientStmt = db.prepare(
+    'SELECT * FROM consultations WHERE patient_id = ? ORDER BY id DESC'
+  );
+  const getConsultationByIdStmt = db.prepare('SELECT * FROM consultations WHERE id = ?');
+  const getCrmUserStmt = db.prepare('SELECT * FROM crm_users WHERE username = ?');
+  const insertCrmUserStmt = db.prepare(
+    'INSERT INTO crm_users (username, password_hash) VALUES (?, ?)'
+  );
+  const countCrmUsersStmt = db.prepare('SELECT COUNT(*) as total FROM crm_users');
+  const getDashboardStatsStmt = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM patients WHERE form_completed = 1) as totalPatients,
+      (SELECT COUNT(*) FROM consultations WHERE status = 'open') as openConsultations,
+      (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'confirmed') as confirmedAppointments,
+      (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'pending') as pendingAppointments,
+      (SELECT COUNT(*) FROM consultations) as totalConsultations
   `);
 
   function ensurePatient(phone) {
@@ -284,17 +336,90 @@ function createDatabase(config) {
     updateAppointmentStatusStmt.run(status, cleanPhone);
   }
 
+  // --- CRM functions ---
+
+  function updateConsultationStatus(consultationId, status) {
+    updateConsultationStatusStmt.run(status, consultationId);
+  }
+
+  function updateConsultationNotes(consultationId, notes) {
+    updateConsultationNotesStmt.run(notes, consultationId);
+  }
+
+  function markEmailNotified(consultationId) {
+    markEmailNotifiedStmt.run(consultationId);
+  }
+
+  function getAllPatients({ limit = 50, offset = 0 } = {}) {
+    const patients = getAllPatientsStmt.all(limit, offset);
+    const total = countPatientsStmt.get().total;
+    return { patients, total };
+  }
+
+  function getPatientById(id) {
+    return getPatientByIdStmt.get(id) || null;
+  }
+
+  function getConsultationsByPatient(patientId) {
+    return getConsultationsByPatientStmt.all(patientId);
+  }
+
+  function getConsultationById(consultationId) {
+    return getConsultationByIdStmt.get(consultationId) || null;
+  }
+
+  function getDashboardStats() {
+    return getDashboardStatsStmt.get();
+  }
+
+  // --- CRM auth ---
+
+  function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
+    return `${salt}:${hash}`;
+  }
+
+  function verifyPassword(password, stored) {
+    if (!stored || !stored.includes(':')) return false;
+    const [salt, hash] = stored.split(':');
+    if (!salt || !hash) return false;
+    const attempt = crypto.createHash('sha256').update(salt + password).digest('hex');
+    return attempt === hash;
+  }
+
+  function getCrmUser(username) {
+    return getCrmUserStmt.get(username) || null;
+  }
+
+  function createCrmUser(username, password) {
+    insertCrmUserStmt.run(username, hashPassword(password));
+  }
+
+  function ensureDefaultCrmUser(defaultUser, defaultPass) {
+    const count = countCrmUsersStmt.get().total;
+    if (count === 0) {
+      createCrmUser(defaultUser, defaultPass);
+    }
+  }
+
   function close() {
     db.close();
   }
 
   return {
     db, dbPath,
-    getPatientByPhone, createNewPatient, upsertPatientField,
+    getPatientByPhone, getPatientById, createNewPatient, upsertPatientField,
     markFormCompleted, isFormCompleted,
     createConsultation, getLastConsultation, updateAppointmentStatus,
     addSymptoms, getSymptomsByConsultation,
     resetPatient,
+    // CRM
+    updateConsultationStatus, updateConsultationNotes, markEmailNotified,
+    getAllPatients, getConsultationsByPatient, getConsultationById,
+    getDashboardStats,
+    getCrmUser, createCrmUser, ensureDefaultCrmUser,
+    verifyPassword,
     close,
   };
 }

@@ -111,41 +111,34 @@ function formatDiagnostics(rawResponse) {
   if (Array.isArray(parsed) && parsed.length > 0) {
     const items = parsed.filter((d) => d?.diagnostico);
     if (items.length > 0) {
-      return items
-        .map((d, index) => {
+      const list = items
+        .map((d, i) => {
           const name = cleanText(d.diagnostico);
-          const explanation = cleanText(d.explicacion) || 'Pendiente de evaluación médica.';
-          return `${index + 1}. ${name}\n   ${explanation}`;
+          const cause = cleanText(d.causa || d.explicacion || '');
+          return cause ? `${i + 1}) ${name} (${cause})` : `${i + 1}) ${name}`;
         })
-        .join('\n\n');
+        .join(', ');
+      return `Podria tratarse de: ${list}.`;
     }
   }
 
   const fallback = cleanText(rawResponse);
-  if (fallback) return `1. Orientación general\n   ${fallback}`;
-  return '1. Orientación general\n   Pendiente de evaluación médica.';
+  return fallback ? `Orientacion: ${fallback}` : 'Pendiente de evaluacion medica.';
 }
 
 function buildConsultationSummary({ patient, diagnosticsText }) {
   return [
-    '📋 Resumen de su consulta',
-    '',
-    `Paciente: ${patient?.nombre || '-'}`,
-    `RUT: ${patient?.rut || '-'}`,
-    '',
-    '🩺 Orientación médica',
-    '',
-    'Según los síntomas que describe, las posibles causas son:',
+    `Paciente: ${patient?.nombre || '-'} (${patient?.rut || '-'})`,
     '',
     diagnosticsText,
     '',
-    'Recuerde que esta es solo una orientación inicial. Un médico debe evaluar su caso para un diagnóstico definitivo.',
+    'Un medico debe evaluar su caso para confirmar.',
     '',
-    '¿Desea agendar una hora con el doctor? 😊',
+    'Desea agendar una hora con el doctor?',
   ].join('\n');
 }
 
-function createConsultationHandler({ database, patientFlowStore, geminiService }) {
+function createConsultationHandler({ database, patientFlowStore, geminiService, emailService }) {
   async function extractConsultationDetails(prompt) {
     const rawResponse = await geminiService.generateText({
       prompt: buildConsultationExtractionPrompt(prompt),
@@ -186,6 +179,20 @@ function createConsultationHandler({ database, patientFlowStore, geminiService }
     if (isAffirmative(prompt)) {
       patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
       database.updateAppointmentStatus(phone, 'confirmed');
+
+      // Fire-and-forget email notification
+      if (emailService) {
+        const patient = database.getPatientByPhone(phone);
+        const consultation = database.getLastConsultation(phone);
+        const symptoms = consultation ? database.getSymptomsByConsultation(consultation.id) : [];
+
+        emailService.sendAppointmentNotification({ patient, consultation, symptoms })
+          .then((sent) => {
+            if (sent && consultation) database.markEmailNotified(consultation.id);
+          })
+          .catch((err) => log('error', 'email.appointment_trigger_failed', { phone, error: err?.message }));
+      }
+
       return { body: APPOINTMENT_CONFIRM_MESSAGE };
     }
 

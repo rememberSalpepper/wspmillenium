@@ -224,6 +224,7 @@ function createWebhookRouter({
   patientFlowStore,
   formHandler,
   consultationHandler,
+  emailService,
 }) {
   const router = express.Router();
 
@@ -495,6 +496,8 @@ function createWebhookRouter({
         return;
       }
 
+      patientFlowStore.setState(from, FLOW_STATES.CONFIRMING_IDENTITY);
+
       await deliverReply({
         from,
         msgId,
@@ -505,6 +508,60 @@ function createWebhookRouter({
         errorEvent: 'whatsapp.confirm_identity_send_error',
       });
 
+      return;
+    }
+
+    // Handle response to identity confirmation
+    if (flowState === FLOW_STATES.CONFIRMING_IDENTITY) {
+      const normalized = normalizeForPatterns(prompt);
+      const isSamePatient = /\bsi\b|\bsí\b|\bsi soy\b|\bsoy yo\b|\bmism[oa]\b/.test(normalized);
+      const isNewPatient = /\bnuevo\b|\bnueva\b|\botr[oa]\b/.test(normalized);
+
+      if (isSamePatient) {
+        log('info', 'flow.identity_confirmed_same', { from });
+        conversationStore.clear(from);
+        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
+
+        await deliverReply({
+          from,
+          msgId,
+          body: 'Bienvenido(a) de vuelta 👋 Cuénteme brevemente sus síntomas y el motivo de su consulta.',
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.returning_patient_welcome_sent',
+          errorEvent: 'whatsapp.returning_patient_welcome_error',
+        });
+        return;
+      }
+
+      if (isNewPatient || wantsRestart(prompt)) {
+        log('info', 'flow.identity_confirmed_new', { from });
+        database.resetPatient(from);
+        patientFlowStore.clearState(from);
+        conversationStore.clear(from);
+
+        await deliverReply({
+          from,
+          msgId,
+          body: config.BOT_WELCOME_MESSAGE,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.new_patient_reset_sent',
+          errorEvent: 'whatsapp.new_patient_reset_error',
+        });
+        return;
+      }
+
+      // Unrecognized response, re-ask
+      await deliverReply({
+        from,
+        msgId,
+        body: 'Responda "sí" si es la misma persona, o "nuevo" para iniciar desde cero.',
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.confirm_identity_resent',
+        errorEvent: 'whatsapp.confirm_identity_resend_error',
+      });
       return;
     }
 
@@ -532,6 +589,12 @@ function createWebhookRouter({
           batchCount: batch.count,
         },
       });
+
+      // Send emergency email notification
+      if (automatedReply.kind === 'emergency' && emailService) {
+        emailService.sendEmergencyNotification({ phone: from, message: prompt })
+          .catch((err) => log('error', 'email.emergency_trigger_failed', { from, error: err?.message }));
+      }
 
       return;
     }
@@ -597,48 +660,95 @@ function createWebhookRouter({
     }
 
     if (flowState === FLOW_STATES.COMPLETED) {
-      if (wantsRestart(prompt)) {
-        log('info', 'flow.restart_new_patient', { from, prompt: previewText(prompt) });
+      const trimmed = prompt.trim();
 
-        database.createNewPatient(from);
-        patientFlowStore.setState(from, FLOW_STATES.COLLECTING_RUT);
-
-        let formReply;
-        try {
-          formReply = await formHandler.handleMessage({
-            phone: from,
-            prompt,
-            state: FLOW_STATES.COLLECTING_RUT,
-            patient: database.getPatientByPhone(from),
-          });
-        } catch (formErr) {
-          logError('form.restart_error', formErr, { msgId, from });
-          formReply = {
-            body: config.BOT_WELCOME_MESSAGE,
-            skipWordLimit: true,
-          };
-        }
-
-        const safeFormRestart = applyReplyLimits(formReply?.body, config, {
-          skipWordLimit: Boolean(formReply?.skipWordLimit),
-        });
+      // Explicit reset / borrar datos → full delete
+      if (isResetCommand(prompt)) {
+        database.resetPatient(from);
+        patientFlowStore.clearState(from);
+        conversationStore.clear(from);
+        log('info', 'flow.completed_reset', { from });
 
         await deliverReply({
-          from,
-          msgId,
-          body: safeFormRestart,
-          conversationStore,
-          whatsappService,
-          successEvent: 'outbound.form_restart_sent',
-          errorEvent: 'whatsapp.form_restart_send_error',
-          logData: { batchCount: batch.count },
+          from, msgId,
+          body: `Datos eliminados ✅\n\n${config.BOT_WELCOME_MESSAGE}`,
+          conversationStore, whatsappService,
+          successEvent: 'outbound.completed_reset_sent',
+          errorEvent: 'whatsapp.completed_reset_error',
         });
-
         return;
       }
 
-      log('info', 'flow.completed_new_consultation', { from, prompt: previewText(prompt) });
-      patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
+      // "nueva consulta" / "otra consulta" → new consultation, keep patient data
+      if (wantsRestart(prompt)) {
+        log('info', 'flow.completed_new_consultation', { from });
+        conversationStore.clear(from);
+        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
+
+        await deliverReply({
+          from, msgId,
+          body: 'Cuénteme brevemente sus síntomas y el motivo de su nueva consulta 🩺',
+          conversationStore, whatsappService,
+          successEvent: 'outbound.new_consultation_sent',
+          errorEvent: 'whatsapp.new_consultation_error',
+        });
+        return;
+      }
+
+      // Menu option "1" → new consultation
+      if (trimmed === '1') {
+        log('info', 'flow.completed_menu_new_consultation', { from });
+        conversationStore.clear(from);
+        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
+
+        await deliverReply({
+          from, msgId,
+          body: 'Cuénteme brevemente sus síntomas y el motivo de su nueva consulta 🩺',
+          conversationStore, whatsappService,
+          successEvent: 'outbound.menu_new_consultation_sent',
+          errorEvent: 'whatsapp.menu_new_consultation_error',
+        });
+        return;
+      }
+
+      // Menu option "2" → appointment status
+      if (trimmed === '2') {
+        const lastConsultation = database.getLastConsultation(from);
+        const statusMap = {
+          pending: 'pendiente de confirmación',
+          confirmed: 'confirmada, nos pondremos en contacto pronto',
+          declined: 'no agendada',
+        };
+        const statusText = statusMap[lastConsultation?.appointment_status] || 'sin información';
+
+        await deliverReply({
+          from, msgId,
+          body: `Estado de su última cita: ${statusText}.`,
+          conversationStore, whatsappService,
+          successEvent: 'outbound.appointment_status_sent',
+          errorEvent: 'whatsapp.appointment_status_error',
+        });
+        return;
+      }
+
+      // Any other message → show menu
+      const menuMessage = [
+        'En qué puedo ayudarle?',
+        '',
+        '1) Nueva consulta médica',
+        '2) Consultar estado de mi cita',
+        '',
+        'Escriba el número de la opción.',
+      ].join('\n');
+
+      await deliverReply({
+        from, msgId,
+        body: menuMessage,
+        conversationStore, whatsappService,
+        successEvent: 'outbound.completed_menu_sent',
+        errorEvent: 'whatsapp.completed_menu_error',
+      });
+      return;
     }
 
     if (

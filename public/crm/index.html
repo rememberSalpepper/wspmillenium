@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM - Consultas Millenium</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Login -->
+  <div id="loginView" class="login-container">
+    <div class="login-box">
+      <h1>Consultas Millenium</h1>
+      <form id="loginForm">
+        <div class="form-group">
+          <label>Usuario</label>
+          <input type="text" id="loginUser" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label>Contrasena</label>
+          <input type="password" id="loginPass" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Ingresar</button>
+        <div id="loginError" class="error-msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="appView" class="app-container">
+    <div class="header">
+      <h1>CRM Consultas Millenium</h1>
+      <div class="header-actions">
+        <span class="user-label" id="headerUser"></span>
+        <button class="btn btn-sm btn-outline" id="logoutBtn">Salir</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <!-- Stats -->
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <!-- Patient List -->
+      <div id="patientListView">
+        <div class="card">
+          <div class="card-header">
+            <span>Pacientes</span>
+            <button class="btn btn-sm btn-outline" id="refreshBtn">Actualizar</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>RUT</th>
+                <th>Telefono</th>
+                <th>Ultima actualizacion</th>
+              </tr>
+            </thead>
+            <tbody id="patientTableBody"></tbody>
+          </table>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </div>
+
+      <!-- Patient Detail -->
+      <div id="patientDetailView" class="detail-panel">
+        <span class="back-link" id="backToList">Volver a pacientes</span>
+        <div class="card" style="margin-bottom:1rem;">
+          <div class="card-header">Datos del paciente</div>
+          <div class="info-grid" id="patientInfo"></div>
+        </div>
+        <h3 style="font-size:0.95rem;margin-bottom:0.75rem;">Consultas</h3>
+        <div id="consultationsList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

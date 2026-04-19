@@ -10,6 +10,7 @@ const FLOW_STATES = {
   CONSULTATION_SUMMARY: 'consultation_summary',
   AWAITING_APPOINTMENT: 'awaiting_appointment',
   COMPLETED: 'completed',
+  CONFIRMING_IDENTITY: 'confirming_identity',
 };
 
 const FORM_STATES = new Set([

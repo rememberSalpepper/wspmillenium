@@ -12,6 +12,9 @@ const { createDatabase } = require('./database');
 const { PatientFlowStore } = require('./stores/patientFlowStore');
 const { createFormHandler } = require('./handlers/formHandler');
 const { createConsultationHandler } = require('./handlers/consultationHandler');
+const path = require('path');
+const { createEmailService } = require('./services/email');
+const { createCrmRouter } = require('./routes/crm');
 
 if (missingEnv.length > 0) {
   log('error', 'config.missing', { missingEnv });
@@ -67,6 +70,7 @@ const patientFlowStore = new PatientFlowStore({
   database,
   ttlMs: config.PATIENT_FLOW_TTL_MS,
 });
+const emailService = createEmailService(config);
 const formHandler = createFormHandler({
   database,
   patientFlowStore,
@@ -76,7 +80,14 @@ const consultationHandler = createConsultationHandler({
   database,
   patientFlowStore,
   geminiService,
+  emailService,
 });
+
+// Ensure default CRM admin user exists
+database.ensureDefaultCrmUser(config.CRM_USER, config.CRM_PASS);
+if (config.CRM_PASS === 'admin123') {
+  log('warn', 'crm.default_password', { message: 'Using default CRM password. Set CRM_PASS in .env for production.' });
+}
 
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -112,6 +123,10 @@ app.get('/health', (req, res) => {
   });
 });
 
+// CRM static files and API
+app.use('/crm', express.static(path.join(__dirname, '..', 'public', 'crm')));
+app.use('/crm/api', createCrmRouter({ config, database }));
+
 app.use(
   '/webhook',
   createWebhookRouter({
@@ -126,6 +141,7 @@ app.use(
     patientFlowStore,
     formHandler,
     consultationHandler,
+    emailService,
   })
 );
 
