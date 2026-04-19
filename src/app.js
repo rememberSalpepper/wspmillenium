@@ -126,7 +126,7 @@ app.get('/health', (req, res) => {
 
 // CRM static files and API
 app.use('/crm', express.static(path.join(__dirname, '..', 'public', 'crm')));
-app.use('/crm/api', createCrmRouter({ config, database }));
+app.use('/crm/api', createCrmRouter({ config, database, whatsappService }));
 
 app.use(
   '/webhook',

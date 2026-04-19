@@ -5,7 +5,8 @@
   "description": "WhatsApp Cloud API bot with Gemini",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "jest --verbose"
   },
   "dependencies": {
     "@google/genai": "^1.13.0",
@@ -15,5 +16,8 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0"
   }
 }

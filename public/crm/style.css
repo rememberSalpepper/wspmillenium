@@ -1007,3 +1007,87 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
     align-items: flex-start;
   }
 }
+
+/* ─── Modal ─────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: var(--bg-card);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  width: 90%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  padding: 1.25rem 1.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-body {
+  padding: 1rem 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.modal-body .slot-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0;
+}
+
+.modal-body .slot-list li {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.4rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.modal-body .slot-list li:hover {
+  background: var(--accent-bg);
+}
+
+.modal-body .slot-list li.selected {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+.modal-footer {
+  padding: 0.75rem 1.5rem 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.modal-body .reschedule-date {
+  margin-bottom: 0.75rem;
+}
+
+.modal-body .reschedule-date label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.3rem;
+}
+
+.modal-body .loading-slots {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.5rem 0;
+}

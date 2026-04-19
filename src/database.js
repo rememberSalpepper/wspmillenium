@@ -322,6 +322,11 @@ function createDatabase(config) {
     'SELECT * FROM doctor_schedule WHERE day_of_week = ? AND is_active = 1 ORDER BY start_time'
   );
 
+  // --- Scheduled appointments by phone ---
+  const getScheduledAppointmentsByPhoneStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.phone = ? AND a.status = 'scheduled' AND a.appointment_date >= date('now') ORDER BY a.appointment_date, a.appointment_time"
+  );
+
   // --- Search patients ---
   const searchPatientsStmt = db.prepare(
     "SELECT * FROM patients WHERE form_completed = 1 AND (nombre LIKE ? OR rut LIKE ? OR phone LIKE ? OR telefono LIKE ?) ORDER BY updated_at DESC LIMIT ?"
@@ -445,6 +450,10 @@ function createDatabase(config) {
         db.prepare(`DELETE FROM consulta_sintomas WHERE consulta_id IN (${cPlaceholders})`)
           .run(...consultationIds);
       }
+
+      // Delete appointments (FK on patient_id and consultation_id)
+      db.prepare(`DELETE FROM appointments WHERE patient_id IN (${placeholders})`)
+        .run(...patientIds);
 
       db.prepare(`DELETE FROM consultations WHERE patient_id IN (${placeholders})`)
         .run(...patientIds);
@@ -694,6 +703,10 @@ function createDatabase(config) {
 
   // --- Search patients ---
 
+  function getScheduledAppointmentsByPhone(phone) {
+    return getScheduledAppointmentsByPhoneStmt.all(phone);
+  }
+
   function searchPatients(query, limit = 20) {
     const q = '%' + String(query || '').trim() + '%';
     return searchPatientsStmt.all(q, q, q, q, limit);
@@ -757,7 +770,7 @@ function createDatabase(config) {
     createAppointment, getAppointmentById, getAppointmentsByDate,
     getAppointmentsByDateRange, updateAppointment, rescheduleAppointment,
     getTodayAppointments, getUpcomingAppointments,
-    getAvailableSlots,
+    getAvailableSlots, getScheduledAppointmentsByPhone,
     close,
   };
 }

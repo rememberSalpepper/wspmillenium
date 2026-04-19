@@ -2,7 +2,9 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { createAuthMiddleware, createLoginRateLimiter } = require('../middleware/crmAuth');
 
-function createCrmRouter({ config, database }) {
+const { log } = require('../logger');
+
+function createCrmRouter({ config, database, whatsappService }) {
   const router = express.Router();
   const requireAuth = createAuthMiddleware(config);
   const rateLimitLogin = createLoginRateLimiter();
@@ -161,6 +163,16 @@ function createCrmRouter({ config, database }) {
     res.json(database.getTodayAppointments());
   });
 
+  // Available slots for rescheduling
+  router.get('/appointments/:id/available-slots', requireAuth, (req, res) => {
+    const apt = database.getAppointmentById(parseInt(req.params.id));
+    if (!apt) return res.status(404).json({ error: 'not_found' });
+
+    const fromDate = req.query.date || new Date().toISOString().split('T')[0];
+    const slots = database.getAvailableSlots(fromDate, 10, apt.duration_min || 30);
+    res.json(slots);
+  });
+
   // Update appointment (status, notes, reschedule)
   router.patch('/appointments/:id', requireAuth, (req, res) => {
     const id = parseInt(req.params.id);
@@ -168,11 +180,47 @@ function createCrmRouter({ config, database }) {
     if (!apt) return res.status(404).json({ error: 'not_found' });
 
     const { status, notes, appointment_date, appointment_time } = req.body || {};
+    const patient = database.getPatientById(apt.patient_id);
+    const patientName = patient?.nombre || 'paciente';
 
     if (appointment_date && appointment_time) {
       database.rescheduleAppointment(id, appointment_date, appointment_time);
+
+      // Notify patient via WhatsApp
+      if (whatsappService && apt.phone) {
+        const msg = [
+          `Estimado(a) ${patientName},`,
+          '',
+          'Su cita ha sido reagendada.',
+          `Nueva fecha: ${appointment_date}`,
+          `Nueva hora: ${appointment_time}`,
+          '',
+          'Si necesita cancelar o reagendar, escríbanos.',
+        ].join('\n');
+
+        whatsappService.sendText(apt.phone, msg).catch((err) => {
+          log('error', 'crm.reschedule_notification_failed', { phone: apt.phone, error: err?.message });
+        });
+      }
     } else if (status) {
       database.updateAppointment(id, status, notes !== undefined ? notes : apt.notes);
+
+      // Notify patient via WhatsApp on cancellation
+      if (status === 'cancelled' && whatsappService && apt.phone) {
+        const msg = [
+          `Estimado(a) ${patientName},`,
+          '',
+          'Lamentamos informarle que su cita ha sido cancelada.',
+          `Fecha original: ${apt.appointment_date}`,
+          `Hora original: ${apt.appointment_time}`,
+          '',
+          'Si desea reagendar, escríbanos por este medio.',
+        ].join('\n');
+
+        whatsappService.sendText(apt.phone, msg).catch((err) => {
+          log('error', 'crm.cancel_notification_failed', { phone: apt.phone, error: err?.message });
+        });
+      }
     }
 
     res.json(database.getAppointmentById(id));

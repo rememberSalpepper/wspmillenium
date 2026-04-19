@@ -653,6 +653,20 @@
           e.stopPropagation();
           var id = parseInt(btn.getAttribute('data-apt-id'));
           var action = btn.getAttribute('data-apt-action');
+
+          if (action === 'cancel_confirm') {
+            var name = btn.getAttribute('data-apt-name') || 'paciente';
+            var date = btn.getAttribute('data-apt-date') || '';
+            var time = btn.getAttribute('data-apt-time') || '';
+            showCancelConfirmModal(id, name, date, time);
+            return;
+          }
+
+          if (action === 'reschedule') {
+            showRescheduleModal(id);
+            return;
+          }
+
           api('PATCH', '/appointments/' + id, { status: action }).then(function () {
             toast('Cita actualizada', 'success');
             renderAgenda();
@@ -671,7 +685,8 @@
     if (apt.status === 'scheduled') {
       html += '<button class="btn btn-sm btn-success" data-apt-id="' + apt.id + '" data-apt-action="completed">Completar</button>';
       html += '<button class="btn btn-sm btn-outline" data-apt-id="' + apt.id + '" data-apt-action="no_show">No show</button>';
-      html += '<button class="btn btn-sm btn-danger" data-apt-id="' + apt.id + '" data-apt-action="cancelled">Cancelar</button>';
+      html += '<button class="btn btn-sm btn-outline" data-apt-id="' + apt.id + '" data-apt-action="reschedule" data-apt-date="' + esc(apt.appointment_date) + '" data-apt-time="' + esc(apt.appointment_time) + '" data-apt-name="' + esc(apt.nombre || '') + '">Reagendar</button>';
+      html += '<button class="btn btn-sm btn-danger" data-apt-id="' + apt.id + '" data-apt-action="cancel_confirm" data-apt-date="' + esc(apt.appointment_date) + '" data-apt-time="' + esc(apt.appointment_time) + '" data-apt-name="' + esc(apt.nombre || '') + '">Cancelar</button>';
     } else if (apt.status === 'completed') {
       html += '<span class="badge badge-completed">Completada</span>';
     } else if (apt.status === 'cancelled') {
@@ -842,6 +857,120 @@
       toast('Error', 'error');
     });
   });
+
+  // ─── Modal helpers ────
+
+  function showModal(title, bodyHtml, footerHtml) {
+    document.getElementById('modalHeader').innerHTML = esc(title);
+    document.getElementById('modalBody').innerHTML = bodyHtml;
+    document.getElementById('modalFooter').innerHTML = footerHtml;
+    document.getElementById('modalOverlay').style.display = 'flex';
+  }
+
+  function hideModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+
+  document.getElementById('modalOverlay').addEventListener('click', function (e) {
+    if (e.target === this) hideModal();
+  });
+
+  function showCancelConfirmModal(aptId, name, date, time) {
+    var body = '<p>¿Está seguro que desea cancelar esta cita?</p>' +
+      '<p><strong>Paciente:</strong> ' + esc(name) + '<br>' +
+      '<strong>Fecha:</strong> ' + esc(date) + '<br>' +
+      '<strong>Hora:</strong> ' + esc(time) + '</p>' +
+      '<p>El paciente será notificado por WhatsApp.</p>';
+
+    var footer = '<button class="btn btn-outline" id="modalCancelBack">Volver</button>' +
+      '<button class="btn btn-danger" id="modalCancelConfirm">Cancelar cita</button>';
+
+    showModal('Cancelar cita', body, footer);
+
+    document.getElementById('modalCancelBack').addEventListener('click', hideModal);
+    document.getElementById('modalCancelConfirm').addEventListener('click', function () {
+      api('PATCH', '/appointments/' + aptId, { status: 'cancelled' }).then(function () {
+        hideModal();
+        toast('Cita cancelada. Paciente notificado.', 'success');
+        renderAgenda();
+      }).catch(function () {
+        hideModal();
+        toast('Error al cancelar', 'error');
+      });
+    });
+  }
+
+  function showRescheduleModal(aptId) {
+    var today = new Date().toISOString().split('T')[0];
+    var body = '<div class="reschedule-date">' +
+      '<label>Seleccione fecha:</label>' +
+      '<input type="date" id="rescheduleDate" class="date-picker" value="' + today + '" min="' + today + '">' +
+      '</div>' +
+      '<div id="rescheduleSlots"><p class="loading-slots">Cargando horarios...</p></div>';
+
+    var footer = '<button class="btn btn-outline" id="modalRescheduleBack">Volver</button>' +
+      '<button class="btn btn-primary" id="modalRescheduleConfirm" disabled>Reagendar</button>';
+
+    showModal('Reagendar cita', body, footer);
+
+    var selectedSlot = null;
+
+    function loadSlots(date) {
+      var container = document.getElementById('rescheduleSlots');
+      container.innerHTML = '<p class="loading-slots">Cargando horarios...</p>';
+      selectedSlot = null;
+      var confirmBtn = document.getElementById('modalRescheduleConfirm');
+      if (confirmBtn) confirmBtn.disabled = true;
+
+      api('GET', '/appointments/' + aptId + '/available-slots?date=' + date).then(function (slots) {
+        if (!slots || slots.length === 0) {
+          container.innerHTML = '<p class="loading-slots">No hay horarios disponibles para esta fecha.</p>';
+          return;
+        }
+        var html = '<ul class="slot-list">';
+        slots.forEach(function (slot, i) {
+          html += '<li data-slot-idx="' + i + '">' + esc(slot.dayLabel) + ' ' + esc(slot.date) + ' - ' + esc(slot.time) + '</li>';
+        });
+        html += '</ul>';
+        container.innerHTML = html;
+
+        container.querySelectorAll('.slot-list li').forEach(function (li) {
+          li.addEventListener('click', function () {
+            container.querySelectorAll('.slot-list li').forEach(function (el) { el.classList.remove('selected'); });
+            li.classList.add('selected');
+            var idx = parseInt(li.getAttribute('data-slot-idx'));
+            selectedSlot = slots[idx];
+            var confirmBtn = document.getElementById('modalRescheduleConfirm');
+            if (confirmBtn) confirmBtn.disabled = false;
+          });
+        });
+      }).catch(function () {
+        container.innerHTML = '<p class="loading-slots">Error cargando horarios.</p>';
+      });
+    }
+
+    loadSlots(today);
+
+    document.getElementById('rescheduleDate').addEventListener('change', function () {
+      loadSlots(this.value);
+    });
+
+    document.getElementById('modalRescheduleBack').addEventListener('click', hideModal);
+    document.getElementById('modalRescheduleConfirm').addEventListener('click', function () {
+      if (!selectedSlot) return;
+      api('PATCH', '/appointments/' + aptId, {
+        appointment_date: selectedSlot.date,
+        appointment_time: selectedSlot.time
+      }).then(function () {
+        hideModal();
+        toast('Cita reagendada. Paciente notificado.', 'success');
+        renderAgenda();
+      }).catch(function () {
+        hideModal();
+        toast('Error al reagendar', 'error');
+      });
+    });
+  }
 
   // ─── Init ────
 

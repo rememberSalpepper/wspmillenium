@@ -11,6 +11,8 @@ const FLOW_STATES = {
   AWAITING_APPOINTMENT: 'awaiting_appointment',
   SELECTING_APPOINTMENT: 'selecting_appointment',
   CONFIRMING_APPOINTMENT: 'confirming_appointment',
+  MANAGING_APPOINTMENT: 'managing_appointment',
+  RESCHEDULING_APPOINTMENT: 'rescheduling_appointment',
   COMPLETED: 'completed',
   CONFIRMING_IDENTITY: 'confirming_identity',
 };

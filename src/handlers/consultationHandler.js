@@ -379,9 +379,161 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     };
   }
 
+  function handleManagingAppointment({ phone, prompt }) {
+    const stateData = patientFlowStore.getStateData(phone);
+    const appointment = stateData?.appointment;
+
+    if (!appointment) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: 'Ocurrió un error. Intente nuevamente.' };
+    }
+
+    const trimmed = String(prompt || '').trim();
+    const normalized = normalizeText(prompt);
+
+    if (trimmed === '1' || /\bcancelar\b|\bcancela\b|\banular\b/.test(normalized)) {
+      database.updateAppointment(appointment.id, 'cancelled', null);
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+
+      const [, month, day] = appointment.appointment_date.split('-');
+      const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+        'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      const monthNum = parseInt(month, 10);
+      const dayNum = parseInt(day, 10);
+
+      return {
+        body: `Su cita del ${dayNum} de ${monthNames[monthNum]} a las ${appointment.appointment_time} ha sido cancelada.\n\nSi desea agendar una nueva hora, escriba "1" para iniciar una nueva consulta.`,
+        skipWordLimit: true,
+      };
+    }
+
+    if (trimmed === '2' || /\breagendar\b|\bcambiar hora\b|\botra hora\b/.test(normalized)) {
+      const slotsToShow = (config && config.APPOINTMENT_SLOTS_TO_SHOW) || 5;
+      const slotDuration = (config && config.APPOINTMENT_SLOT_DURATION) || 30;
+      const slots = database.getAvailableSlots(getTodayStr(), slotsToShow, slotDuration);
+
+      if (!slots || slots.length === 0) {
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+        return { body: 'No hay horarios disponibles en las próximas semanas. Nos pondremos en contacto.' };
+      }
+
+      patientFlowStore.setStateWithData(phone, FLOW_STATES.RESCHEDULING_APPOINTMENT, {
+        step: 'selecting',
+        slots,
+        appointmentId: appointment.id,
+      });
+      return { body: buildSlotsMessage(slots), skipWordLimit: true };
+    }
+
+    if (trimmed === '3' || /\bvolver\b/.test(normalized) || isNegative(prompt)) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: 'De acuerdo. Si necesita algo más, escríbanos.' };
+    }
+
+    return {
+      body: 'Responda con el número de la opción:\n1) Cancelar cita\n2) Reagendar cita\n3) Volver',
+    };
+  }
+
+  function handleReschedulingAppointment({ phone, prompt }) {
+    const stateData = patientFlowStore.getStateData(phone);
+    const step = stateData?.step || 'selecting';
+    const appointmentId = stateData?.appointmentId;
+
+    if (!appointmentId) {
+      patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+      return { body: 'Ocurrió un error. Intente nuevamente.' };
+    }
+
+    if (step === 'selecting') {
+      const slots = stateData?.slots || [];
+
+      if (slots.length === 0) {
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+        return { body: 'Ocurrió un error. Nos pondremos en contacto para reagendar su hora.' };
+      }
+
+      const trimmed = String(prompt || '').trim();
+      const num = parseInt(trimmed, 10);
+
+      if (Number.isNaN(num) || num < 1 || num > slots.length) {
+        return { body: buildSlotsMessage(slots), skipWordLimit: true };
+      }
+
+      const selectedSlot = slots[num - 1];
+
+      patientFlowStore.setStateWithData(phone, FLOW_STATES.RESCHEDULING_APPOINTMENT, {
+        step: 'confirming',
+        slots,
+        selectedSlot,
+        appointmentId,
+      });
+
+      return {
+        body: `Ha seleccionado: ${formatSlotDate(selectedSlot)}\n¿Confirma reagendar a esta hora? (si/no)`,
+      };
+    }
+
+    if (step === 'confirming') {
+      const selectedSlot = stateData?.selectedSlot;
+
+      if (!selectedSlot) {
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+        return { body: 'Ocurrió un error. Nos pondremos en contacto para reagendar su hora.' };
+      }
+
+      if (isNegative(prompt)) {
+        const slotsToShow = (config && config.APPOINTMENT_SLOTS_TO_SHOW) || 5;
+        const slotDuration = (config && config.APPOINTMENT_SLOT_DURATION) || 30;
+        const freshSlots = database.getAvailableSlots(getTodayStr(), slotsToShow, slotDuration);
+
+        if (!freshSlots || freshSlots.length === 0) {
+          patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+          return { body: 'No hay horarios disponibles en las próximas semanas. Nos pondremos en contacto.' };
+        }
+
+        patientFlowStore.setStateWithData(phone, FLOW_STATES.RESCHEDULING_APPOINTMENT, {
+          step: 'selecting',
+          slots: freshSlots,
+          appointmentId,
+        });
+        return { body: buildSlotsMessage(freshSlots), skipWordLimit: true };
+      }
+
+      if (isAffirmative(prompt)) {
+        database.rescheduleAppointment(appointmentId, selectedSlot.date, selectedSlot.time);
+        patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+
+        return {
+          body: [
+            'Su cita ha sido reagendada:',
+            `Fecha: ${formatSlotDateFull(selectedSlot)}`,
+            `Hora: ${selectedSlot.time}`,
+            '',
+            'Si necesita cancelar o reagendar, escríbanos.',
+          ].join('\n'),
+          skipWordLimit: true,
+        };
+      }
+
+      return { body: 'Responda "si" para confirmar la hora, o "no" para ver otras opciones.' };
+    }
+
+    patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+    return { body: 'Ocurrió un error. Intente nuevamente.' };
+  }
+
   async function handleMessage({ phone, prompt, patient }) {
     const activePatient = patient || database.getPatientByPhone(phone);
     const currentState = patientFlowStore.getState(phone);
+
+    if (currentState === FLOW_STATES.MANAGING_APPOINTMENT) {
+      return handleManagingAppointment({ phone, prompt });
+    }
+
+    if (currentState === FLOW_STATES.RESCHEDULING_APPOINTMENT) {
+      return handleReschedulingAppointment({ phone, prompt });
+    }
 
     if (currentState === FLOW_STATES.CONFIRMING_APPOINTMENT) {
       return handleConfirmingAppointment({ phone, prompt });

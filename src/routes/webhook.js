@@ -731,12 +731,63 @@ function createWebhookRouter({
         return;
       }
 
+      // Menu option "3" → cancel or reschedule appointment
+      if (trimmed === '3') {
+        const scheduled = database.getScheduledAppointmentsByPhone(from);
+
+        if (!scheduled || scheduled.length === 0) {
+          await deliverReply({
+            from, msgId,
+            body: 'No tiene citas agendadas actualmente.',
+            conversationStore, whatsappService,
+            successEvent: 'outbound.no_appointments_sent',
+            errorEvent: 'whatsapp.no_appointments_error',
+          });
+          return;
+        }
+
+        const apt = scheduled[0];
+        const [, month, day] = apt.appointment_date.split('-');
+        const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+          'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        const dateObj = new Date(apt.appointment_date + 'T00:00:00');
+        const dayName = dayNames[dateObj.getDay()];
+        const monthNum = parseInt(month, 10);
+        const dayNum = parseInt(day, 10);
+
+        const msg = [
+          'Su próxima cita:',
+          `📅 Fecha: ${dayName} ${dayNum} de ${monthNames[monthNum]}`,
+          `🕐 Hora: ${apt.appointment_time}`,
+          '',
+          '¿Qué desea hacer?',
+          '1) Cancelar cita',
+          '2) Reagendar cita',
+          '3) Volver',
+          '',
+          'Responda con el número de la opción.',
+        ].join('\n');
+
+        patientFlowStore.setStateWithData(from, FLOW_STATES.MANAGING_APPOINTMENT, { appointment: apt });
+
+        await deliverReply({
+          from, msgId,
+          body: msg,
+          conversationStore, whatsappService,
+          successEvent: 'outbound.manage_appointment_sent',
+          errorEvent: 'whatsapp.manage_appointment_error',
+        });
+        return;
+      }
+
       // Any other message → show menu
       const menuMessage = [
         'En qué puedo ayudarle?',
         '',
         '1) Nueva consulta médica',
         '2) Consultar estado de mi cita',
+        '3) Cancelar o reagendar mi cita',
         '',
         'Escriba el número de la opción.',
       ].join('\n');
@@ -756,6 +807,8 @@ function createWebhookRouter({
       flowState === FLOW_STATES.AWAITING_APPOINTMENT ||
       flowState === FLOW_STATES.SELECTING_APPOINTMENT ||
       flowState === FLOW_STATES.CONFIRMING_APPOINTMENT ||
+      flowState === FLOW_STATES.MANAGING_APPOINTMENT ||
+      flowState === FLOW_STATES.RESCHEDULING_APPOINTMENT ||
       flowState === FLOW_STATES.COMPLETED
     ) {
       let consultationReply;
