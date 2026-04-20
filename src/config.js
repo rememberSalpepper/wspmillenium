@@ -62,6 +62,9 @@ const config = {
   GRAPH_VER: process.env.GRAPH_VERSION || 'v22.0',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  GEMINI_FALLBACK_MODEL: process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.0-flash',
+  GEMINI_RETRY_COUNT: toNumber(process.env.GEMINI_RETRY_COUNT, 2),
+  GEMINI_RETRY_DELAY_MS: toNumber(process.env.GEMINI_RETRY_DELAY_MS, 1500),
   PORT: toNumber(process.env.PORT, 3000),
 
   BOT_SYSTEM_INSTRUCTION: botSystemInstruction,

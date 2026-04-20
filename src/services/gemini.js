@@ -1,5 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { withTimeout } = require('../utils/timeout');
+const { log } = require('../logger');
 
 function isGeminiQuotaError(err) {
   const status = err?.status ?? err?.response?.status ?? err?.code ?? null;
@@ -19,8 +20,47 @@ function isGeminiQuotaError(err) {
   );
 }
 
+function isTransientError(err) {
+  const message = String(err?.message || '').toLowerCase();
+  const status = err?.status ?? err?.response?.status ?? err?.code ?? null;
+  return (
+    status === 503 ||
+    String(status) === '503' ||
+    message.includes('503') ||
+    message.includes('unavailable') ||
+    message.includes('high demand') ||
+    message.includes('overloaded') ||
+    message.includes('internal error') ||
+    status === 500 ||
+    String(status) === '500'
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createGeminiService(config) {
   const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
+  const maxRetries = config.GEMINI_RETRY_COUNT ?? 2;
+  const baseDelay = config.GEMINI_RETRY_DELAY_MS ?? 1500;
+  const fallbackModel = config.GEMINI_FALLBACK_MODEL || '';
+
+  async function callGemini({ model, contents, systemInstruction }) {
+    const result = await withTimeout(
+      ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction,
+        },
+      }),
+      config.GEMINI_TIMEOUT_MS,
+      'Gemini timeout'
+    );
+    const text = (result?.text ?? '').trim();
+    return text || 'No pude generar una respuesta.';
+  }
 
   async function generateText({
     contents = null,
@@ -36,20 +76,58 @@ function createGeminiService(config) {
           },
         ];
 
-    const result = await withTimeout(
-      ai.models.generateContent({
-        model: config.GEMINI_MODEL,
-        contents: requestContents,
-        config: {
-          systemInstruction,
-        },
-      }),
-      config.GEMINI_TIMEOUT_MS,
-      'Gemini timeout'
-    );
+    let lastError;
 
-    const text = (result?.text ?? '').trim();
-    return text || 'No pude generar una respuesta.';
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await callGemini({
+          model: config.GEMINI_MODEL,
+          contents: requestContents,
+          systemInstruction,
+        });
+      } catch (err) {
+        lastError = err;
+        const retryable = isTransientError(err) || isGeminiQuotaError(err);
+
+        if (attempt < maxRetries && retryable) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          log('warn', 'gemini.retry', {
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: delay,
+            model: config.GEMINI_MODEL,
+            error: String(err?.message || '').slice(0, 200),
+          });
+          await sleep(delay);
+          continue;
+        }
+
+        if (retryable && fallbackModel && fallbackModel !== config.GEMINI_MODEL) {
+          try {
+            log('warn', 'gemini.fallback', {
+              from: config.GEMINI_MODEL,
+              to: fallbackModel,
+              error: String(err?.message || '').slice(0, 200),
+            });
+            return await callGemini({
+              model: fallbackModel,
+              contents: requestContents,
+              systemInstruction,
+            });
+          } catch (fallbackErr) {
+            log('error', 'gemini.fallback_failed', {
+              model: fallbackModel,
+              error: String(fallbackErr?.message || '').slice(0, 200),
+            });
+            throw fallbackErr;
+          }
+        }
+
+        throw err;
+      }
+    }
+
+    throw lastError;
   }
 
   async function generateReply(contents) {
@@ -60,6 +138,7 @@ function createGeminiService(config) {
     generateText,
     generateReply,
     isGeminiQuotaError,
+    isTransientError,
   };
 }
 

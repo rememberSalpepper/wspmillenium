@@ -596,7 +596,14 @@ function createWebhookRouter({
           .catch((err) => log('error', 'email.emergency_trigger_failed', { from, error: err?.message }));
       }
 
-      return;
+      // For welcome messages: if the user sent substantial data along with
+      // the greeting, continue to the form handler instead of discarding it.
+      if (automatedReply.kind === 'welcome' && prompt.length > 20) {
+        log('info', 'flow.welcome_with_data', { from, promptLength: prompt.length });
+        // fall through to form handler below
+      } else {
+        return;
+      }
     }
 
     if (isFormCollectionState(flowState)) {

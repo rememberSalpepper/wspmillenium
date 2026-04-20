@@ -1,0 +1,1 @@
+- [VPS deployment](reference_vps_deployment.md) — IP, Docker, Caddy, domain, paths, env vars for wa-bot on vps-aeb05009
