@@ -630,7 +630,7 @@ function createDatabase(config) {
     return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
   }
 
-  function getAvailableSlots(fromDate, count = 5, slotDuration = 30) {
+  function getAvailableSlots(fromDate, count = 6, slotDuration = 30) {
     const slots = [];
     const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
     const maxDays = 14;
@@ -657,12 +657,15 @@ function createDatabase(config) {
       // Get already booked slots
       const booked = getBookedSlotsForDateStmt.all(dateStr);
 
+      // Collect ALL available slots for this day across all blocks
+      const daySlots = [];
+
       for (const block of scheduleBlocks) {
         const blockStart = timeToMinutes(block.start_time);
         const blockEnd = timeToMinutes(block.end_time);
         const dur = slotDuration || block.slot_duration_min || 30;
 
-        for (let t = blockStart; t + dur <= blockEnd && slots.length < count; t += dur) {
+        for (let t = blockStart; t + dur <= blockEnd; t += dur) {
           const slotTime = minutesToTime(t);
 
           // Skip past slots for today
@@ -689,11 +692,25 @@ function createDatabase(config) {
           });
           if (isBooked) continue;
 
-          slots.push({
+          daySlots.push({
             date: dateStr,
             time: slotTime,
             dayLabel: dayNames[dayOfWeek],
           });
+        }
+      }
+
+      if (daySlots.length === 0) continue;
+
+      // Distribute evenly across the day's available slots
+      const remaining = count - slots.length;
+      if (daySlots.length <= remaining) {
+        slots.push(...daySlots);
+      } else {
+        // Pick distributed slots: first, last, and evenly spaced between
+        const step = (daySlots.length - 1) / (remaining - 1);
+        for (let i = 0; i < remaining; i++) {
+          slots.push(daySlots[Math.round(i * step)]);
         }
       }
     }

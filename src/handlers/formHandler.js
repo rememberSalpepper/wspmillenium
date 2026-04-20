@@ -122,7 +122,7 @@ function buildFormSummary(patient) {
     `Teléfono: ${patient?.telefono || '-'}`,
     `Dirección: ${patient?.direccion || '-'}`,
     '',
-    'Si todo está correcto, responda "sí". Si necesita corregir algo, indíqueme cuál dato.',
+    'Si todo está correcto, responda "sí" ✅ Si necesita corregir algo, indíqueme cuál dato.',
   ].join('\n');
 }
 

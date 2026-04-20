@@ -14,7 +14,7 @@ const APPOINTMENT_CONFIRM_MESSAGE =
   'Perfecto, su hora con el doctor quedó pendiente de confirmación. Nos pondremos en contacto para confirmar fecha y horario 📅';
 
 const APPOINTMENT_DECLINE_MESSAGE =
-  'Entendido. Si más adelante desea agendar una hora con el doctor, no dude en escribirnos. ¡Que se mejore! 🙏';
+  'Entendido 👍 Si más adelante desea agendar una hora con el doctor, no dude en escribirnos. ¡Que se mejore! 🙏';
 
 const GREETING_PATTERNS = [
   'hola',
@@ -117,24 +117,22 @@ function formatDiagnostics(rawResponse) {
           const cause = cleanText(d.causa || d.explicacion || '');
           return cause ? `${i + 1}) ${name} (${cause})` : `${i + 1}) ${name}`;
         })
-        .join(', ');
-      return `Podria tratarse de: ${list}.`;
+        .join('\n');
+      return `🩺 Podria tratarse de:\n\n${list}`;
     }
   }
 
   const fallback = cleanText(rawResponse);
-  return fallback ? `Orientacion: ${fallback}` : 'Pendiente de evaluacion medica.';
+  return fallback ? `🩺 Orientacion: ${fallback}` : 'Pendiente de evaluacion medica.';
 }
 
 function buildConsultationSummary({ patient, diagnosticsText }) {
   return [
-    `Paciente: ${patient?.nombre || '-'} (${patient?.rut || '-'})`,
-    '',
     diagnosticsText,
     '',
-    'Un medico debe evaluar su caso para confirmar.',
+    '⚠️ Un medico debe evaluar su caso para confirmar.',
     '',
-    'Desea agendar una hora con el doctor?',
+    '📅 ¿Desea agendar una hora con el doctor?',
   ].join('\n');
 }
 
@@ -168,9 +166,9 @@ function formatSlotDateFull(slot) {
 }
 
 function buildSlotsMessage(slots) {
-  const lines = ['Horarios disponibles:', ''];
+  const lines = ['📅 Horarios disponibles:', ''];
   slots.forEach((slot, i) => {
-    lines.push(`${i + 1}) ${formatSlotDate(slot)}`);
+    lines.push(`${i + 1}) 🕐 ${formatSlotDate(slot)}`);
   });
   lines.push('');
   lines.push('Responda con el numero de la opcion.');
@@ -364,11 +362,12 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       }
 
       const confirmBody = [
-        'Su hora quedo agendada:',
-        `Fecha: ${formatSlotDateFull(selectedSlot)}`,
-        `Hora: ${selectedSlot.time}`,
+        '✅ Su hora quedo agendada:',
         '',
-        'Si necesita cancelar o reagendar, escribanos.',
+        `📅 Fecha: ${formatSlotDateFull(selectedSlot)}`,
+        `🕐 Hora: ${selectedSlot.time}`,
+        '',
+        'Si necesita cancelar o reagendar, escribanos 😊',
       ].join('\n');
 
       return { body: confirmBody, skipWordLimit: true };
@@ -506,11 +505,12 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
         return {
           body: [
-            'Su cita ha sido reagendada:',
-            `Fecha: ${formatSlotDateFull(selectedSlot)}`,
-            `Hora: ${selectedSlot.time}`,
+            '✅ Su cita ha sido reagendada:',
             '',
-            'Si necesita cancelar o reagendar, escríbanos.',
+            `📅 Fecha: ${formatSlotDateFull(selectedSlot)}`,
+            `🕐 Hora: ${selectedSlot.time}`,
+            '',
+            'Si necesita cancelar o reagendar, escríbanos 😊',
           ].join('\n'),
           skipWordLimit: true,
         };

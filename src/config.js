@@ -107,7 +107,7 @@ const config = {
   // Appointments
   APPOINTMENT_SLOT_DURATION: toNumber(process.env.APPOINTMENT_SLOT_DURATION, 30),
   APPOINTMENT_LOOKAHEAD_DAYS: toNumber(process.env.APPOINTMENT_LOOKAHEAD_DAYS, 14),
-  APPOINTMENT_SLOTS_TO_SHOW: toNumber(process.env.APPOINTMENT_SLOTS_TO_SHOW, 5),
+  APPOINTMENT_SLOTS_TO_SHOW: toNumber(process.env.APPOINTMENT_SLOTS_TO_SHOW, 6),
 };
 
 const requiredEnv = [

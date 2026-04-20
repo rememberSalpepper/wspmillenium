@@ -572,36 +572,36 @@ function createWebhookRouter({
     });
 
     if (automatedReply) {
-      const safeAutomatedReply = applyReplyLimits(automatedReply.body, config, {
-        skipWordLimit: true,
-      });
-
-      await deliverReply({
-        from,
-        msgId,
-        body: safeAutomatedReply,
-        conversationStore,
-        whatsappService,
-        successEvent: 'outbound.policy_reply_sent',
-        errorEvent: 'whatsapp.policy_reply_send_error',
-        logData: {
-          policy: automatedReply.kind,
-          batchCount: batch.count,
-        },
-      });
-
-      // Send emergency email notification
-      if (automatedReply.kind === 'emergency' && emailService) {
-        emailService.sendEmergencyNotification({ phone: from, message: prompt })
-          .catch((err) => log('error', 'email.emergency_trigger_failed', { from, error: err?.message }));
-      }
-
-      // For welcome messages: if the user sent substantial data along with
-      // the greeting, continue to the form handler instead of discarding it.
+      // If user sent data along with the first message, skip welcome and go
+      // straight to form handler so the data isn't lost / double-messaged.
       if (automatedReply.kind === 'welcome' && prompt.length > 20) {
         log('info', 'flow.welcome_with_data', { from, promptLength: prompt.length });
         // fall through to form handler below
       } else {
+        const safeAutomatedReply = applyReplyLimits(automatedReply.body, config, {
+          skipWordLimit: true,
+        });
+
+        await deliverReply({
+          from,
+          msgId,
+          body: safeAutomatedReply,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.policy_reply_sent',
+          errorEvent: 'whatsapp.policy_reply_send_error',
+          logData: {
+            policy: automatedReply.kind,
+            batchCount: batch.count,
+          },
+        });
+
+        // Send emergency email notification
+        if (automatedReply.kind === 'emergency' && emailService) {
+          emailService.sendEmergencyNotification({ phone: from, message: prompt })
+            .catch((err) => log('error', 'email.emergency_trigger_failed', { from, error: err?.message }));
+        }
+
         return;
       }
     }

@@ -27,6 +27,12 @@
         logout();
         throw new Error('Session expired');
       }
+      if (!res.ok) {
+        return res.text().then(function (text) {
+          console.error('API error', method, path, res.status, text);
+          throw new Error('API error: ' + res.status);
+        });
+      }
       return res.json();
     });
   }
@@ -675,8 +681,9 @@
           });
         });
       });
-    }).catch(function () {
-      timeline.innerHTML = '<div class="empty-state"><p>Error cargando agenda</p></div>';
+    }).catch(function (err) {
+      console.error('Agenda load error:', err);
+      timeline.innerHTML = '<div class="empty-state"><p>Error cargando agenda. Verifique su conexion e intente nuevamente.</p></div>';
     });
   }
 

@@ -282,7 +282,9 @@ body {
 .main-content {
   margin-left: var(--sidebar-w);
   padding: 2rem;
+  padding-right: 2rem;
   min-height: 100vh;
+  max-width: calc(var(--sidebar-w) + 1200px);
 }
 
 .view-header {
@@ -957,12 +959,22 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
 
   .main-content {
     margin-left: 0;
-    padding: 1rem;
-    padding-top: calc(56px + 1rem);
+    padding: 0.75rem;
+    padding-top: calc(56px + 0.75rem);
+    max-width: 100%;
   }
 
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  .stat-card {
+    padding: 0.85rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
   }
 
   .grid-2 {
@@ -987,6 +999,10 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
     align-items: flex-start;
   }
 
+  .view-header h2 {
+    font-size: 1.15rem;
+  }
+
   .edit-section {
     flex-direction: column;
   }
@@ -997,6 +1013,17 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
     font-size: 0.75rem;
   }
 
+  .agenda-content {
+    padding: 0.45rem 0.65rem;
+    flex-wrap: wrap;
+  }
+
+  .agenda-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 0.25rem;
+  }
+
   .block-form {
     flex-direction: column;
     align-items: stretch;
@@ -1005,6 +1032,29 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
   .schedule-day {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .card-header {
+    padding: 0.65rem 0.85rem;
+    font-size: 0.82rem;
+  }
+
+  .card-body {
+    padding: 0.85rem;
+  }
+
+  th, td {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  .modal {
+    width: 95%;
+  }
+
+  .pagination {
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 }
 
@@ -1021,7 +1071,7 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
 }
 
 .modal {
-  background: var(--bg-card);
+  background: var(--card);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
   width: 90%;

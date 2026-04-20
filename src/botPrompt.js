@@ -18,7 +18,7 @@ const DEFAULT_HUMAN_HANDOFF_MESSAGE =
   'Te voy a derivar con una asistente humana para continuar por este medio 🙋‍♀️ Si quieres adelantar el proceso, envíame tu nombre completo y RUT.';
 
 const DEFAULT_EMERGENCY_MESSAGE =
-  'Por los sintomas que describes, debes acudir a un servicio de urgencia de inmediato. No es seguro continuar esta evaluacion por WhatsApp. Como siguiente paso, busca atencion presencial ahora.';
+  '🚨 Por los sintomas que describes, debes acudir a un servicio de urgencia de inmediato. No es seguro continuar esta evaluacion por WhatsApp. Como siguiente paso, busca atencion presencial ahora.';
 
 function buildPricingInstruction(pricingTableText) {
   const cleanTable = String(pricingTableText || '').trim();
