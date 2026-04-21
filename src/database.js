@@ -5,6 +5,10 @@ const Database = require('better-sqlite3');
 
 const PATIENT_FIELDS = new Set(['rut', 'nombre', 'correo', 'telefono', 'direccion']);
 
+function todayInChile() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+}
+
 function createDatabase(config) {
   const dbPath = path.resolve(config.DB_PATH);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -248,8 +252,8 @@ function createDatabase(config) {
       (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'confirmed') as confirmedAppointments,
       (SELECT COUNT(*) FROM consultations WHERE appointment_status = 'pending') as pendingAppointments,
       (SELECT COUNT(*) FROM consultations) as totalConsultations,
-      (SELECT COUNT(*) FROM appointments WHERE appointment_date = date('now') AND status != 'cancelled') as todayAppointments,
-      (SELECT COUNT(*) FROM appointments WHERE appointment_date > date('now') AND status = 'scheduled') as upcomingAppointments
+      (SELECT COUNT(*) FROM appointments WHERE appointment_date = ? AND status != 'cancelled') as todayAppointments,
+      (SELECT COUNT(*) FROM appointments WHERE appointment_date > ? AND status = 'scheduled') as upcomingAppointments
   `);
 
   // --- Schedule prepared statements ---
@@ -310,10 +314,10 @@ function createDatabase(config) {
     "UPDATE appointments SET appointment_date = ?, appointment_time = ?, status = 'scheduled', updated_at = datetime('now') WHERE id = ?"
   );
   const getTodayAppointmentsStmt = db.prepare(
-    "SELECT a.*, p.nombre, p.rut, p.telefono FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date = date('now') AND a.status != 'cancelled' ORDER BY a.appointment_time"
+    "SELECT a.*, p.nombre, p.rut, p.telefono FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date = ? AND a.status != 'cancelled' ORDER BY a.appointment_time"
   );
   const getUpcomingAppointmentsStmt = db.prepare(
-    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date >= date('now') AND a.status = 'scheduled' ORDER BY a.appointment_date, a.appointment_time LIMIT 20"
+    "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date >= ? AND a.status = 'scheduled' ORDER BY a.appointment_date, a.appointment_time LIMIT 20"
   );
   const getBookedSlotsForDateStmt = db.prepare(
     "SELECT appointment_time, duration_min FROM appointments WHERE appointment_date = ? AND status != 'cancelled'"
@@ -508,7 +512,8 @@ function createDatabase(config) {
   }
 
   function getDashboardStats() {
-    return getDashboardStatsStmt.get();
+    const today = todayInChile();
+    return getDashboardStatsStmt.get(today, today);
   }
 
   // --- Schedule functions ---
@@ -610,11 +615,11 @@ function createDatabase(config) {
   }
 
   function getTodayAppointments() {
-    return getTodayAppointmentsStmt.all();
+    return getTodayAppointmentsStmt.all(todayInChile());
   }
 
   function getUpcomingAppointments() {
-    return getUpcomingAppointmentsStmt.all();
+    return getUpcomingAppointmentsStmt.all(todayInChile());
   }
 
   // --- Available slots algorithm ---
@@ -669,8 +674,10 @@ function createDatabase(config) {
           const slotTime = minutesToTime(t);
 
           // Skip past slots for today
-          if (dateStr === now.toISOString().split('T')[0]) {
-            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+          const nowChile = todayInChile();
+          if (dateStr === nowChile) {
+            const nowInChile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+            const nowMinutes = nowInChile.getHours() * 60 + nowInChile.getMinutes();
             if (t <= nowMinutes) continue;
           }
 

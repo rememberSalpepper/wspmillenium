@@ -283,6 +283,7 @@ body {
   margin-left: var(--sidebar-w);
   padding: 2rem 3rem;
   min-height: 100vh;
+  width: calc(100% - var(--sidebar-w));
 }
 
 .view-header {

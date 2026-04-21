@@ -176,8 +176,7 @@ function buildSlotsMessage(slots) {
 }
 
 function getTodayStr() {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
 }
 
 function createConsultationHandler({ database, patientFlowStore, geminiService, emailService, config }) {
