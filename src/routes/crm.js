@@ -94,13 +94,23 @@ function createCrmRouter({ config, database, whatsappService }) {
 
   // Get weekly schedule
   router.get('/schedule', requireAuth, (req, res) => {
-    const schedule = database.getWeeklySchedule();
-    res.json(schedule);
+    try {
+      const schedule = database.getWeeklySchedule();
+      res.json(schedule);
+    } catch (err) {
+      log('error', 'crm.schedule_error', { error: err?.message });
+      res.status(500).json({ error: 'schedule_load_failed', details: err?.message });
+    }
   });
 
   // Get all date blocks (must be before /schedule/:id)
   router.get('/schedule/blocks', requireAuth, (req, res) => {
-    res.json(database.getDateBlocks());
+    try {
+      res.json(database.getDateBlocks());
+    } catch (err) {
+      log('error', 'crm.blocks_error', { error: err?.message });
+      res.status(500).json({ error: 'blocks_load_failed', details: err?.message });
+    }
   });
 
   // Add date block
@@ -145,17 +155,27 @@ function createCrmRouter({ config, database, whatsappService }) {
 
   // List appointments (with optional date range filter)
   router.get('/appointments', requireAuth, (req, res) => {
-    const { from, to } = req.query;
-    if (from && to) {
-      res.json(database.getAppointmentsByDateRange(from, to));
-    } else {
-      res.json(database.getUpcomingAppointments());
+    try {
+      const { from, to } = req.query;
+      if (from && to) {
+        res.json(database.getAppointmentsByDateRange(from, to));
+      } else {
+        res.json(database.getUpcomingAppointments());
+      }
+    } catch (err) {
+      log('error', 'crm.appointments_error', { error: err?.message });
+      res.status(500).json({ error: 'appointments_load_failed', details: err?.message });
     }
   });
 
   // Get appointments for a specific day
   router.get('/appointments/day/:date', requireAuth, (req, res) => {
-    res.json(database.getAppointmentsByDate(req.params.date));
+    try {
+      res.json(database.getAppointmentsByDate(req.params.date));
+    } catch (err) {
+      log('error', 'crm.appointments_day_error', { date: req.params.date, error: err?.message });
+      res.status(500).json({ error: 'appointments_day_failed', details: err?.message });
+    }
   });
 
   // Today's appointments

@@ -43,6 +43,8 @@
     return div.innerHTML;
   }
 
+  var esc = escapeHtml;
+
   function formatDate(d) {
     if (!d) return '-';
     try {
