@@ -127,7 +127,14 @@ app.get('/health', (req, res) => {
 });
 
 // CRM static files and API
-app.use('/crm', express.static(path.join(__dirname, '..', 'public', 'crm')));
+app.use('/crm', express.static(path.join(__dirname, '..', 'public', 'crm'), {
+  etag: false,
+  maxAge: 0,
+  setHeaders: (res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Pragma', 'no-cache');
+  },
+}));
 app.use('/crm/api', createCrmRouter({ config, database, whatsappService }));
 
 app.use(
