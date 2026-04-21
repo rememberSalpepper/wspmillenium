@@ -176,6 +176,38 @@ setInterval(() => {
   patientFlowStore.cleanup();
 }, 5 * 60 * 1000).unref();
 
+// Appointment reminder scheduler — checks every 5 min for appointments in the next hour
+setInterval(() => {
+  try {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const appointments = database.getAppointmentsNeedingReminder(today);
+
+    for (const apt of appointments) {
+      const [h, m] = apt.appointment_time.split(':').map(Number);
+      const aptMinutes = h * 60 + m;
+      const diff = aptMinutes - nowMinutes;
+
+      // Send reminder when appointment is between 30 and 65 minutes away
+      if (diff > 0 && diff <= 65) {
+        emailService.sendAppointmentReminder({
+          patient: { nombre: apt.nombre, rut: apt.rut, telefono: apt.telefono },
+          appointmentDate: apt.appointment_date,
+          appointmentTime: apt.appointment_time,
+        }).then((sent) => {
+          if (sent) database.markReminderSent(apt.id);
+        }).catch((err) => {
+          log('error', 'reminder.send_failed', { aptId: apt.id, error: err?.message });
+        });
+      }
+    }
+  } catch (err) {
+    log('error', 'reminder.scheduler_error', { error: err?.message });
+  }
+}, 5 * 60 * 1000).unref();
+
 module.exports = {
   app,
   config,

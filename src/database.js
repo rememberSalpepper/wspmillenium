@@ -155,6 +155,12 @@ function createDatabase(config) {
     )
   `);
 
+  // Ensure reminder_sent column exists (migration)
+  const appointmentCols = db.prepare("PRAGMA table_info(appointments)").all().map(c => c.name);
+  if (!appointmentCols.includes('reminder_sent')) {
+    db.exec("ALTER TABLE appointments ADD COLUMN reminder_sent INTEGER DEFAULT 0");
+  }
+
   // Seed default doctor schedule if empty
   const scheduleCount = db.prepare('SELECT COUNT(*) as total FROM doctor_schedule').get().total;
   if (scheduleCount === 0) {
@@ -318,6 +324,12 @@ function createDatabase(config) {
   );
   const getUpcomingAppointmentsStmt = db.prepare(
     "SELECT a.*, p.nombre, p.rut FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date >= ? AND a.status = 'scheduled' ORDER BY a.appointment_date, a.appointment_time LIMIT 20"
+  );
+  const getAppointmentsNeedingReminderStmt = db.prepare(
+    "SELECT a.*, p.nombre, p.rut, p.telefono, p.correo FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id WHERE a.appointment_date = ? AND a.status = 'scheduled' AND a.reminder_sent = 0"
+  );
+  const markReminderSentStmt = db.prepare(
+    "UPDATE appointments SET reminder_sent = 1 WHERE id = ?"
   );
   const getBookedSlotsForDateStmt = db.prepare(
     "SELECT appointment_time, duration_min FROM appointments WHERE appointment_date = ? AND status != 'cancelled'"
@@ -767,6 +779,14 @@ function createDatabase(config) {
     }
   }
 
+  function getAppointmentsNeedingReminder(date) {
+    return getAppointmentsNeedingReminderStmt.all(date);
+  }
+
+  function markReminderSent(id) {
+    markReminderSentStmt.run(id);
+  }
+
   function close() {
     db.close();
   }
@@ -795,6 +815,7 @@ function createDatabase(config) {
     getAppointmentsByDateRange, updateAppointment, rescheduleAppointment,
     getTodayAppointments, getUpcomingAppointments,
     getAvailableSlots, getScheduledAppointmentsByPhone,
+    getAppointmentsNeedingReminder, markReminderSent,
     close,
   };
 }

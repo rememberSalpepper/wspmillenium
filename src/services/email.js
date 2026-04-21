@@ -7,6 +7,7 @@ function createEmailService(config) {
     return {
       sendAppointmentNotification: async () => false,
       sendEmergencyNotification: async () => false,
+      sendAppointmentReminder: async () => false,
     };
   }
 
@@ -105,9 +106,44 @@ function createEmailService(config) {
     }
   }
 
+  async function sendAppointmentReminder({ patient, appointmentDate, appointmentTime }) {
+    const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const [, month, day] = appointmentDate.split('-');
+    const dateLabel = `${parseInt(day)} de ${monthNames[parseInt(month)]}`;
+
+    const body = [
+      'RECORDATORIO DE CITA',
+      '',
+      `Paciente: ${patient?.nombre || '-'}`,
+      `RUT: ${patient?.rut || '-'}`,
+      `Teléfono: ${patient?.telefono || '-'}`,
+      '',
+      `Fecha: ${dateLabel}`,
+      `Hora: ${appointmentTime}`,
+      '',
+      'Esta cita es en aproximadamente 1 hora.',
+    ].join('\n');
+
+    try {
+      await transporter.sendMail({
+        from: config.SMTP_USER,
+        to: config.NOTIFY_EMAIL,
+        subject: `Recordatorio: ${patient?.nombre || 'Paciente'} a las ${appointmentTime}`,
+        text: body,
+      });
+
+      log('info', 'email.reminder_sent', { to: config.NOTIFY_EMAIL, patient: patient?.nombre, time: appointmentTime });
+      return true;
+    } catch (err) {
+      log('error', 'email.reminder_failed', { error: err?.message, to: config.NOTIFY_EMAIL });
+      return false;
+    }
+  }
+
   log('info', 'email.enabled', { notifyEmail: config.NOTIFY_EMAIL });
 
-  return { sendAppointmentNotification, sendEmergencyNotification };
+  return { sendAppointmentNotification, sendEmergencyNotification, sendAppointmentReminder };
 }
 
 module.exports = { createEmailService };
