@@ -958,9 +958,9 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
 
   .main-content {
     margin-left: 0;
+    width: 100%;
     padding: 0.75rem;
     padding-top: calc(56px + 0.75rem);
-    max-width: 100%;
   }
 
   .stats-grid {
