@@ -587,7 +587,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       patientId: activePatient.id,
       sintomas: symptomsText,
       motivo: reason,
-      orientacion: diagnostics.raw,
+      orientacion: diagnostics.formatted,
       resumen: summary,
     });
 

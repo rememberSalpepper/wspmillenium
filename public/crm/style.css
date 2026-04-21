@@ -281,10 +281,8 @@ body {
 
 .main-content {
   margin-left: var(--sidebar-w);
-  padding: 2rem;
-  padding-right: 2rem;
+  padding: 2rem 3rem;
   min-height: 100vh;
-  max-width: calc(var(--sidebar-w) + 1200px);
 }
 
 .view-header {
@@ -1109,12 +1107,12 @@ tbody tr:hover { background: var(--primary-light); cursor: pointer; }
 }
 
 .modal-body .slot-list li:hover {
-  background: var(--accent-bg);
+  background: var(--primary-light);
 }
 
 .modal-body .slot-list li.selected {
-  background: var(--accent-bg);
-  border-color: var(--accent);
+  background: var(--primary-light);
+  border-color: var(--primary);
   font-weight: 500;
 }
 
