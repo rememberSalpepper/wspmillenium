@@ -393,6 +393,13 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       database.updateAppointment(appointment.id, 'cancelled', null);
       patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
 
+      // Notify doctor via email
+      if (emailService) {
+        const patient = database.getPatientByPhone(phone);
+        emailService.sendCancellationNotification({ patient, appointment })
+          .catch((err) => log('error', 'email.cancellation_trigger_failed', { phone, error: err?.message }));
+      }
+
       const [, month, day] = appointment.appointment_date.split('-');
       const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
         'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -499,8 +506,22 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       }
 
       if (isAffirmative(prompt)) {
+        // Get old appointment info before rescheduling
+        const oldAppointment = database.getAppointmentById(appointmentId);
+
         database.rescheduleAppointment(appointmentId, selectedSlot.date, selectedSlot.time);
         patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
+
+        // Notify doctor via email
+        if (emailService && oldAppointment) {
+          const patient = database.getPatientByPhone(phone);
+          emailService.sendRescheduleNotification({
+            patient,
+            oldAppointment,
+            newDate: selectedSlot.date,
+            newTime: selectedSlot.time,
+          }).catch((err) => log('error', 'email.reschedule_trigger_failed', { phone, error: err?.message }));
+        }
 
         return {
           body: [
