@@ -74,6 +74,29 @@ function createWhatsAppService(config) {
     });
   }
 
+  // Send a pre-approved template message. Required to message a user outside the
+  // 24h customer-service window (e.g. appointment reminders).
+  // components: Meta template components array (e.g. body parameters). Optional.
+  async function sendTemplate(to, { name, languageCode = 'es', components = [] } = {}) {
+    if (!name) throw new Error('Template name is required');
+
+    const template = {
+      name: String(name),
+      language: { code: String(languageCode || 'es') },
+    };
+
+    if (Array.isArray(components) && components.length > 0) {
+      template.components = components;
+    }
+
+    return postMessage({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template,
+    });
+  }
+
   async function markAsReadAndTyping(messageId) {
     return postMessage({
       messaging_product: 'whatsapp',
@@ -106,6 +129,7 @@ function createWhatsAppService(config) {
 
   return {
     sendText,
+    sendTemplate,
     sendInteractiveButtons,
     sendInteractiveList,
     markAsReadAndTyping,

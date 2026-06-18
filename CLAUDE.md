@@ -13,9 +13,12 @@ docker compose up -d
 
 # View logs
 docker compose logs -f app
+
+# Run the test suite (Jest)
+npm test
 ```
 
-There are no test or lint scripts configured.
+Tests live in `tests/` and run with Jest (`npm test`). There is no lint script configured.
 
 ## Architecture Overview
 
@@ -55,12 +58,18 @@ Gemini is called in three distinct modes:
 
 ### Database (SQLite, better-sqlite3)
 
-Synchronous SQLite via `better-sqlite3`. Three tables:
+Synchronous SQLite via `better-sqlite3`. Main tables:
 - `patients` — one row per phone, stores form fields + `form_completed` flag
 - `consultations` — linked to patient, stores symptoms text + orientation
 - `consulta_sintomas` — normalized symptoms per consultation
+- `appointments` / `doctor_schedule` / `schedule_blocks` — appointment scheduling
+- `conversation_turns` — persisted AI conversation history (rolling window, capped per phone)
+- `patient_memory` — long-term summarized memory per phone (one row, injected into the system prompt)
 
-Key methods in `database.js`: `ensurePatient`, `upsertPatientField`, `markFormCompleted`, `createConsultation`, `addSymptoms`, `resetPatient`.
+Indexes exist on `patients.phone`, `consultations.phone`, `appointments.appointment_date`,
+`appointments.phone` and `conversation_turns(phone, id)`.
+
+Key methods in `database.js`: `ensurePatient`, `upsertPatientField`, `markFormCompleted`, `createConsultation`, `addSymptoms`, `resetPatient`, `getPatientMemory`, `upsertPatientMemory`, `clearPatientMemory`.
 
 ### In-Memory Stores
 
@@ -86,15 +95,28 @@ Bot behavior is controlled entirely via environment variables — no code change
 | `MESSAGE_BUFFER_MS` | Batching window (default 2500ms) |
 | `CONTEXT_MAX_TURNS` | Conversation history turns (default 12) |
 | `GEMINI_TIMEOUT_MS` | Gemini request timeout (default 20000ms) |
+| `WHATSAPP_INTERACTIVE` | Interactive buttons/lists (default true) |
+| `WHATSAPP_AUDIO_TRANSCRIPTION` | Transcribe voice notes (default true) |
+| `WHATSAPP_REMINDERS` | Send appointment reminders via WhatsApp (default true) |
+| `WHATSAPP_REMINDER_TEMPLATE` | Approved template name for reminders (empty → plain text) |
+| `WHATSAPP_REMINDER_TEMPLATE_LANG` | Template language code (default `es`) |
+| `EMAIL_REMINDERS` | Send appointment reminders via email to the clinic (default true) |
+| `BOT_REMINDER_MESSAGE` | WhatsApp reminder text; placeholders `{nombre}`, `{fecha}`, `{hora}` |
+| `LONGTERM_MEMORY` | Per-patient summarized long-term memory (default true) |
+| `MEMORY_SUMMARY_EVERY_TURNS` | Turns before refreshing the memory summary (default 10) |
 
 ### Key Files
 
-- `src/routes/webhook.js` — main message processing logic (~770 lines)
-- `src/handlers/formHandler.js` — form collection + Gemini field extraction (~386 lines)
-- `src/handlers/consultationHandler.js` — symptom extraction + orientation (~276 lines)
-- `src/botPrompt.js` — all Gemini system instruction builders
+- `src/routes/webhook.js` — main message processing logic
+- `src/handlers/formHandler.js` — form collection + Gemini field extraction
+- `src/handlers/consultationHandler.js` — symptom extraction + orientation
+- `src/handlers/menuHandler.js` — COMPLETED-state main menu (new consultation / status / cancel-reschedule)
+- `src/services/memory.js` — long-term summarized memory (summary persistence + refresh trigger)
+- `src/services/reminders.js` — WhatsApp + email appointment reminder scheduler logic
+- `src/botPrompt.js` — all Gemini system instruction builders (incl. memory/summary prompts)
 - `src/botPolicy.js` — emergency/handoff keyword patterns
 - `src/config.js` — all env var reading and defaults
+- `src/utils/` — `text.js` (text helpers), `intent.js` (restart/reset detection), `dateFormat.js` (Spanish dates), `signature.js` (webhook HMAC)
 
 ### Deployment
 

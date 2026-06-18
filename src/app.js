@@ -12,8 +12,11 @@ const { createDatabase } = require('./database');
 const { PatientFlowStore } = require('./stores/patientFlowStore');
 const { createFormHandler } = require('./handlers/formHandler');
 const { createConsultationHandler } = require('./handlers/consultationHandler');
+const { createMenuHandler } = require('./handlers/menuHandler');
 const path = require('path');
 const { createEmailService } = require('./services/email');
+const { createMemoryService } = require('./services/memory');
+const { createReminderService } = require('./services/reminders');
 const { createCrmRouter } = require('./routes/crm');
 
 if (missingEnv.length > 0) {
@@ -94,6 +97,23 @@ const consultationHandler = createConsultationHandler({
   emailService,
   config,
 });
+const menuHandler = createMenuHandler({
+  database,
+  patientFlowStore,
+  conversationStore,
+  config,
+});
+const memoryService = createMemoryService({
+  database,
+  geminiService,
+  config,
+});
+const reminderService = createReminderService({
+  database,
+  whatsappService,
+  emailService,
+  config,
+});
 
 // Ensure default CRM admin user exists
 database.ensureDefaultCrmUser(config.CRM_USER, config.CRM_PASS);
@@ -170,6 +190,8 @@ app.use(
     patientFlowStore,
     formHandler,
     consultationHandler,
+    menuHandler,
+    memoryService,
     emailService,
   })
 );
@@ -196,36 +218,10 @@ setInterval(() => {
   database.pruneConversationTurns(config.CONVERSATION_TTL_MS);
 }, 5 * 60 * 1000).unref();
 
-// Appointment reminder scheduler — checks every 5 min for appointments in the next hour
+// Appointment reminder scheduler — checks every 5 min for appointments in the
+// next hour and notifies the patient via WhatsApp + the clinic via email.
 setInterval(() => {
-  try {
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
-    const today = now.toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-
-    const appointments = database.getAppointmentsNeedingReminder(today);
-
-    for (const apt of appointments) {
-      const [h, m] = apt.appointment_time.split(':').map(Number);
-      const aptMinutes = h * 60 + m;
-      const diff = aptMinutes - nowMinutes;
-
-      // Send reminder when appointment is between 30 and 65 minutes away
-      if (diff > 0 && diff <= 65) {
-        emailService.sendAppointmentReminder({
-          patient: { nombre: apt.nombre, rut: apt.rut, telefono: apt.telefono },
-          appointmentDate: apt.appointment_date,
-          appointmentTime: apt.appointment_time,
-        }).then((sent) => {
-          if (sent) database.markReminderSent(apt.id);
-        }).catch((err) => {
-          log('error', 'reminder.send_failed', { aptId: apt.id, error: err?.message });
-        });
-      }
-    }
-  } catch (err) {
-    log('error', 'reminder.scheduler_error', { error: err?.message });
-  }
+  void reminderService.runReminderCheck();
 }, 5 * 60 * 1000).unref();
 
 module.exports = {

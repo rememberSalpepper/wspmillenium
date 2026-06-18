@@ -116,6 +116,13 @@ class ConversationStore {
     return session?.turns?.length || 0;
   }
 
+  // Returns the recent turns as plain { role, text } objects (oldest-first).
+  getTurns(id) {
+    const session = this.peekSession(id);
+    if (!session?.turns?.length) return [];
+    return session.turns.map((turn) => ({ role: turn.role, text: turn.text }));
+  }
+
   clear(id) {
     this.sessions.delete(id);
 

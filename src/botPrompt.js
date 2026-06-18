@@ -188,11 +188,49 @@ function buildConsultationOrientationPrompt({ symptoms, reason }) {
   ].join('\n');
 }
 
+// --- Long-term memory (Fase 5) ---
+
+function buildSummarizationInstruction() {
+  return [
+    'Eres un asistente que mantiene una ficha de memoria breve sobre un paciente de telemedicina.',
+    'Recibes un resumen previo (si existe) y los ultimos mensajes de la conversacion por WhatsApp.',
+    'Devuelve un resumen actualizado, en espanol simple de Chile, en tercera persona.',
+    'Incluye solo datos utiles y duraderos: nombre, contexto medico relevante, sintomas o consultas previas,',
+    'estado de citas, preferencias y cualquier detalle que ayude a dar continuidad.',
+    'No incluyas saludos, cortesias ni mensajes irrelevantes. No inventes datos.',
+    'Maximo 6 lineas o 600 caracteres. Devuelve solo el texto del resumen, sin markdown ni comillas.',
+  ].join('\n');
+}
+
+function buildSummarizationPrompt({ previousSummary, conversation }) {
+  const prev = String(previousSummary || '').trim();
+  return [
+    prev ? `Resumen previo:\n${prev}` : 'No hay resumen previo.',
+    '',
+    'Ultimos mensajes (Paciente / Catalina):',
+    String(conversation || '').trim(),
+    '',
+    'Entrega el resumen actualizado del paciente.',
+  ].join('\n');
+}
+
+function buildMemorySystemSuffix(summary) {
+  const clean = String(summary || '').trim();
+  if (!clean) return '';
+  return [
+    'MEMORIA DEL PACIENTE (contexto de conversaciones anteriores, usalo con naturalidad sin repetirlo literal):',
+    clean,
+  ].join('\n');
+}
+
 module.exports = {
   DEFAULT_WELCOME_MESSAGE,
   DEFAULT_HUMAN_HANDOFF_MESSAGE,
   DEFAULT_EMERGENCY_MESSAGE,
   buildBotSystemInstruction,
+  buildSummarizationInstruction,
+  buildSummarizationPrompt,
+  buildMemorySystemSuffix,
   buildFieldExtractionInstruction,
   buildFieldExtractionPrompt,
   buildFormExtractionInstruction,

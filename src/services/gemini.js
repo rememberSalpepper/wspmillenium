@@ -1,6 +1,10 @@
 const { GoogleGenAI } = require('@google/genai');
 const { withTimeout } = require('../utils/timeout');
 const { log } = require('../logger');
+const {
+  buildSummarizationInstruction,
+  buildSummarizationPrompt,
+} = require('../botPrompt');
 
 function isGeminiQuotaError(err) {
   const status = err?.status ?? err?.response?.status ?? err?.code ?? null;
@@ -130,8 +134,30 @@ function createGeminiService(config) {
     throw lastError;
   }
 
-  async function generateReply(contents) {
-    return generateText({ contents });
+  async function generateReply(contents, systemInstruction) {
+    return generateText({ contents, systemInstruction });
+  }
+
+  // Produces an updated long-term memory summary for a patient (Fase 5).
+  // turns: [{ role: 'user'|'assistant', text }]. Returns the summary text.
+  async function summarizeConversation({ previousSummary = '', turns = [] }) {
+    const conversation = (Array.isArray(turns) ? turns : [])
+      .map((t) => `${t.role === 'assistant' ? 'Catalina' : 'Paciente'}: ${String(t.text || '').trim()}`)
+      .filter((line) => line.length > 10)
+      .join('\n');
+
+    if (!conversation) return String(previousSummary || '').trim();
+
+    const summary = await generateText({
+      prompt: buildSummarizationPrompt({ previousSummary, conversation }),
+      systemInstruction: buildSummarizationInstruction(),
+    });
+
+    const clean = String(summary || '').trim();
+    if (!clean || clean === 'No pude generar una respuesta.') {
+      return String(previousSummary || '').trim();
+    }
+    return clean.slice(0, 700);
   }
 
   // data: base64-encoded audio bytes. Returns the transcribed text.
@@ -160,6 +186,7 @@ function createGeminiService(config) {
   return {
     generateText,
     generateReply,
+    summarizeConversation,
     transcribeAudio,
     isGeminiQuotaError,
     isTransientError,

@@ -3,22 +3,16 @@ const { log } = require('../logger');
 const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
 const { FLOW_STATES, isFormCollectionState } = require('../stores/patientFlowStore');
 const { verifyWebhookSignature } = require('../utils/signature');
-
-const RESTART_PATTERNS = [
-  /\bformulario\b/,
-  /\breinicia/,
-  /\brenuev/,
-  /\bempezar de nuevo\b/,
-  /\bempezar desde cero\b/,
-  /\bde nuevo\b/,
-  /\bdesde cero\b/,
-  /\bnuevo paciente\b/,
-  /\bnueva consulta\b/,
-  /\botra consulta\b/,
-  /\breset\b/,
-];
-
-const RESET_COMMAND = /^\s*(?:borrar datos|borrar|reset|limpiar datos|limpiar)\s*$/;
+const { normalizeForPatterns, wantsRestart, isResetCommand } = require('../utils/intent');
+const {
+  normalizeDigits,
+  previewText,
+  stripMarkdown,
+  truncateText,
+  isStaleMessage,
+  getUnsupportedMessageReply,
+} = require('../utils/text');
+const { buildMemorySystemSuffix } = require('../botPrompt');
 
 const CONFIRM_IDENTITY_MESSAGE = [
   'Tenemos datos registrados a este número.',
@@ -27,81 +21,11 @@ const CONFIRM_IDENTITY_MESSAGE = [
   'Si eres otra persona, responde "nuevo" para iniciar desde cero.',
 ].join('\n');
 
-function normalizeForPatterns(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function wantsRestart(prompt) {
-  const normalized = normalizeForPatterns(prompt);
-  return RESTART_PATTERNS.some((p) => p.test(normalized));
-}
-
-function isResetCommand(prompt) {
-  const normalized = normalizeForPatterns(prompt);
-  return RESET_COMMAND.test(normalized);
-}
-
 const FALLBACK_QUOTA_MESSAGE =
   'Se agotó la cuota de la cuenta API de IA. Estamos en pruebas. Intenta nuevamente en un rato.';
 
 const FALLBACK_TEMPORARY_MESSAGE =
   'Tu mensaje llegó, pero hubo un problema temporal al procesarlo. Intenta nuevamente en un rato.';
-
-function normalizeDigits(value) {
-  return String(value || '').replace(/\D/g, '');
-}
-
-function previewText(text, max = 160) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
-}
-
-function getUnsupportedMessageReply(type) {
-  const base =
-    'Por ahora solo puedo procesar mensajes de texto. Escríbeme tu consulta en texto.';
-
-  switch (type) {
-    case 'audio':
-      return 'Por ahora no puedo escuchar audios. Escríbeme tu mensaje en texto.';
-    case 'image':
-      return 'Por ahora no puedo analizar imágenes. Escríbeme tu consulta en texto.';
-    case 'sticker':
-      return 'Por ahora no puedo interpretar stickers. Escríbeme tu mensaje en texto.';
-    case 'video':
-      return 'Por ahora no puedo analizar videos. Escríbeme tu consulta en texto.';
-    case 'document':
-      return 'Por ahora no puedo leer documentos automáticamente. Escríbeme tu consulta en texto.';
-    case 'location':
-      return 'Por ahora no puedo procesar ubicaciones automáticamente. Escríbeme la información en texto.';
-    case 'contacts':
-      return 'Por ahora no puedo procesar contactos compartidos automáticamente. Escríbeme tu consulta en texto.';
-    default:
-      return base;
-  }
-}
-
-function stripMarkdown(text) {
-  return String(text || '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1')
-    .replace(/_(.+?)_/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/`(.+?)`/g, '$1');
-}
-
-function truncateText(text, maxChars) {
-  const clean = String(text || '').trim();
-  if (!clean) return 'No pude generar una respuesta.';
-  return clean.length > maxChars ? clean.slice(0, maxChars) : clean;
-}
 
 function applyReplyLimits(body, config, options = {}) {
   const { skipWordLimit = false } = options;
@@ -111,18 +35,6 @@ function applyReplyLimits(body, config, options = {}) {
     : limitReplyWords(stripped, config.BOT_MAX_WORDS);
 
   return truncateText(baseText, config.MAX_REPLY_CHARS);
-}
-
-function isStaleMessage(timestampSeconds, maxAgeSeconds) {
-  if (!timestampSeconds) return false;
-
-  const ts = Number(timestampSeconds);
-  if (!Number.isFinite(ts) || ts <= 0) return false;
-
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const ageSeconds = nowSeconds - ts;
-
-  return ageSeconds > maxAgeSeconds;
 }
 
 function logError(event, err, extra = {}) {
@@ -250,6 +162,8 @@ function createWebhookRouter({
   patientFlowStore,
   formHandler,
   consultationHandler,
+  menuHandler,
+  memoryService,
   emailService,
 }) {
   const router = express.Router();
@@ -775,162 +689,16 @@ function createWebhookRouter({
     }
 
     if (flowState === FLOW_STATES.COMPLETED) {
-      const trimmed = prompt.trim();
-
-      // Explicit reset / borrar datos → full delete
-      if (isResetCommand(prompt)) {
-        database.resetPatient(from);
-        patientFlowStore.clearState(from);
-        conversationStore.clear(from);
-        log('info', 'flow.completed_reset', { from });
-
-        await deliverReply({
-          from, msgId,
-          body: `Datos eliminados ✅\n\n${config.BOT_WELCOME_MESSAGE}`,
-          conversationStore, whatsappService,
-          successEvent: 'outbound.completed_reset_sent',
-          errorEvent: 'whatsapp.completed_reset_error',
-        });
-        return;
-      }
-
-      // "nueva consulta" / "otra consulta" → new consultation, keep patient data
-      if (wantsRestart(prompt)) {
-        log('info', 'flow.completed_new_consultation', { from });
-        conversationStore.clear(from);
-        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
-
-        await deliverReply({
-          from, msgId,
-          body: 'Cuénteme brevemente sus síntomas y el motivo de su nueva consulta 🩺',
-          conversationStore, whatsappService,
-          successEvent: 'outbound.new_consultation_sent',
-          errorEvent: 'whatsapp.new_consultation_error',
-        });
-        return;
-      }
-
-      // Menu option "1" → new consultation
-      if (trimmed === '1') {
-        log('info', 'flow.completed_menu_new_consultation', { from });
-        conversationStore.clear(from);
-        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
-
-        await deliverReply({
-          from, msgId,
-          body: 'Cuénteme brevemente sus síntomas y el motivo de su nueva consulta 🩺',
-          conversationStore, whatsappService,
-          successEvent: 'outbound.menu_new_consultation_sent',
-          errorEvent: 'whatsapp.menu_new_consultation_error',
-        });
-        return;
-      }
-
-      // Menu option "2" → appointment status
-      if (trimmed === '2') {
-        const lastConsultation = database.getLastConsultation(from);
-        const statusMap = {
-          pending: 'pendiente de confirmación',
-          confirmed: 'confirmada, nos pondremos en contacto pronto',
-          declined: 'no agendada',
-        };
-        const statusText = statusMap[lastConsultation?.appointment_status] || 'sin información';
-
-        await deliverReply({
-          from, msgId,
-          body: `Estado de su última cita: ${statusText}.`,
-          conversationStore, whatsappService,
-          successEvent: 'outbound.appointment_status_sent',
-          errorEvent: 'whatsapp.appointment_status_error',
-        });
-        return;
-      }
-
-      // Menu option "3" → cancel or reschedule appointment
-      if (trimmed === '3') {
-        const scheduled = database.getScheduledAppointmentsByPhone(from);
-
-        if (!scheduled || scheduled.length === 0) {
-          await deliverReply({
-            from, msgId,
-            body: 'No tiene citas agendadas actualmente.',
-            conversationStore, whatsappService,
-            successEvent: 'outbound.no_appointments_sent',
-            errorEvent: 'whatsapp.no_appointments_error',
-          });
-          return;
-        }
-
-        const apt = scheduled[0];
-        const [, month, day] = apt.appointment_date.split('-');
-        const monthNames = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-          'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-        const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const dateObj = new Date(apt.appointment_date + 'T00:00:00');
-        const dayName = dayNames[dateObj.getDay()];
-        const monthNum = parseInt(month, 10);
-        const dayNum = parseInt(day, 10);
-
-        const msg = [
-          'Su próxima cita:',
-          `📅 Fecha: ${dayName} ${dayNum} de ${monthNames[monthNum]}`,
-          `🕐 Hora: ${apt.appointment_time}`,
-          '',
-          '¿Qué desea hacer?',
-          '1) Cancelar cita',
-          '2) Reagendar cita',
-          '3) Volver',
-          '',
-          'Responda con el número de la opción.',
-        ].join('\n');
-
-        patientFlowStore.setStateWithData(from, FLOW_STATES.MANAGING_APPOINTMENT, { appointment: apt });
-
-        await deliverReply({
-          from, msgId,
-          body: msg,
-          conversationStore, whatsappService,
-          successEvent: 'outbound.manage_appointment_sent',
-          errorEvent: 'whatsapp.manage_appointment_error',
-          interactiveEnabled: config.WHATSAPP_INTERACTIVE,
-          interactive: {
-            type: 'buttons',
-            buttons: [
-              { id: '1', title: 'Cancelar cita' },
-              { id: '2', title: 'Reagendar' },
-              { id: '3', title: 'Volver' },
-            ],
-          },
-        });
-        return;
-      }
-
-      // Any other message → show menu
-      const menuMessage = [
-        'En qué puedo ayudarle?',
-        '',
-        '1) Nueva consulta médica',
-        '2) Consultar estado de mi cita',
-        '3) Cancelar o reagendar mi cita',
-        '',
-        'Escriba el número de la opción.',
-      ].join('\n');
+      const menuReply = menuHandler.handleMessage({ phone: from, prompt });
 
       await deliverReply({
         from, msgId,
-        body: menuMessage,
+        body: menuReply.body,
         conversationStore, whatsappService,
-        successEvent: 'outbound.completed_menu_sent',
-        errorEvent: 'whatsapp.completed_menu_error',
+        successEvent: menuReply.successEvent || 'outbound.completed_menu_sent',
+        errorEvent: menuReply.errorEvent || 'whatsapp.completed_menu_error',
         interactiveEnabled: config.WHATSAPP_INTERACTIVE,
-        interactive: {
-          type: 'buttons',
-          buttons: [
-            { id: '1', title: 'Nueva consulta' },
-            { id: '2', title: 'Estado de cita' },
-            { id: '3', title: 'Cancelar/reagendar' },
-          ],
-        },
+        interactive: menuReply.interactive || null,
       });
       return;
     }
@@ -1009,16 +777,25 @@ function createWebhookRouter({
     try {
       const contents = conversationStore.buildContents(from);
 
+      // Long-term memory (Fase 5): inject the patient summary into the system
+      // prompt so the bot keeps context across sessions.
+      const memorySummary = memoryService?.getSummary(from) || '';
+      const memorySuffix = memorySummary ? buildMemorySystemSuffix(memorySummary) : '';
+      const systemInstruction = memorySuffix
+        ? `${config.BOT_SYSTEM_INSTRUCTION}\n\n${memorySuffix}`
+        : undefined;
+
       log('info', 'gemini.context_summary', {
         from,
         turns: contents.length,
+        hasMemory: Boolean(memorySummary),
         lastTurns: contents.slice(-4).map((item) => ({
           role: item.role,
           textPreview: previewText(item?.parts?.[0]?.text || '', 80),
         })),
       });
 
-      reply = await geminiService.generateReply(contents);
+      reply = await geminiService.generateReply(contents, systemInstruction);
     } catch (geminiErr) {
       logError('gemini.error', geminiErr, {
         msgId,
@@ -1061,6 +838,12 @@ function createWebhookRouter({
         batchCount: batch.count,
       },
     });
+
+    // Refresh the long-term memory summary in the background once enough new
+    // turns have accumulated (Fase 5).
+    if (memoryService) {
+      memoryService.noteTurn(from, conversationStore);
+    }
   }
 
   return router;

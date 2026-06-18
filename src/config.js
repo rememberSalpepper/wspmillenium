@@ -37,6 +37,19 @@ const botPriceTable =
   toMultilineText(process.env.BOT_PRICE_TABLE) ||
   toMultilineText(process.env.BOT_PRICING_TABLE);
 
+const DEFAULT_REMINDER_MESSAGE = [
+  'Hola {nombre} 👋 Le recordamos su cita con el doctor.',
+  '',
+  '📅 {fecha}',
+  '🕐 {hora}',
+  '',
+  'Si necesita cancelar o reagendar, escríbanos por aquí 😊',
+].join('\n');
+
+const botReminderMessage =
+  toMultilineText(process.env.BOT_REMINDER_MESSAGE, DEFAULT_REMINDER_MESSAGE) ||
+  DEFAULT_REMINDER_MESSAGE;
+
 const botAdditionalInstruction = toMultilineText(process.env.BOT_SYSTEM_INSTRUCTION);
 const botInstructionOverride = toMultilineText(process.env.BOT_SYSTEM_INSTRUCTION_OVERRIDE);
 const botWelcomeMessage =
@@ -72,6 +85,7 @@ const config = {
   BOT_WELCOME_MESSAGE: botWelcomeMessage,
   BOT_HUMAN_HANDOFF_MESSAGE: botHumanHandoffMessage,
   BOT_EMERGENCY_MESSAGE: botEmergencyMessage,
+  BOT_REMINDER_MESSAGE: botReminderMessage,
   BOT_MAX_WORDS: toNumber(process.env.BOT_MAX_WORDS, 80),
 
   MAX_REPLY_CHARS: toNumber(process.env.MAX_REPLY_CHARS, 3500),
@@ -112,6 +126,18 @@ const config = {
   // WhatsApp features
   WHATSAPP_INTERACTIVE: toBoolean(process.env.WHATSAPP_INTERACTIVE, true),
   WHATSAPP_AUDIO_TRANSCRIPTION: toBoolean(process.env.WHATSAPP_AUDIO_TRANSCRIPTION, true),
+
+  // WhatsApp reminders (Fase 4)
+  WHATSAPP_REMINDERS: toBoolean(process.env.WHATSAPP_REMINDERS, true),
+  // If a template name is set, reminders are sent as a pre-approved template
+  // (works outside the 24h window). Otherwise a plain text message is attempted.
+  WHATSAPP_REMINDER_TEMPLATE: process.env.WHATSAPP_REMINDER_TEMPLATE || '',
+  WHATSAPP_REMINDER_TEMPLATE_LANG: process.env.WHATSAPP_REMINDER_TEMPLATE_LANG || 'es',
+  EMAIL_REMINDERS: toBoolean(process.env.EMAIL_REMINDERS, true),
+
+  // Long-term summarized memory (Fase 5)
+  LONGTERM_MEMORY: toBoolean(process.env.LONGTERM_MEMORY, true),
+  MEMORY_SUMMARY_EVERY_TURNS: toNumber(process.env.MEMORY_SUMMARY_EVERY_TURNS, 10),
 
   // Appointments
   APPOINTMENT_SLOT_DURATION: toNumber(process.env.APPOINTMENT_SLOT_DURATION, 30),

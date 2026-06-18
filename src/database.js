@@ -174,6 +174,24 @@ function createDatabase(config) {
     CREATE INDEX IF NOT EXISTS idx_conv_turns_phone ON conversation_turns(phone, id);
   `);
 
+  // Long-term summarized memory per patient (Fase 5).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS patient_memory (
+      phone TEXT PRIMARY KEY,
+      summary TEXT,
+      turns_at_update INTEGER DEFAULT 0,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Performance indexes (Fase 6). Hot lookups go through these columns.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_patients_phone ON patients(phone);
+    CREATE INDEX IF NOT EXISTS idx_consultations_phone ON consultations(phone);
+    CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date);
+    CREATE INDEX IF NOT EXISTS idx_appointments_phone ON appointments(phone);
+  `);
+
   // Seed default doctor schedule if empty
   const scheduleCount = db.prepare('SELECT COUNT(*) as total FROM doctor_schedule').get().total;
   if (scheduleCount === 0) {
@@ -385,6 +403,22 @@ function createDatabase(config) {
        )`
   );
 
+  // --- Long-term memory (Fase 5) ---
+  const getPatientMemoryStmt = db.prepare(
+    'SELECT phone, summary, turns_at_update, updated_at FROM patient_memory WHERE phone = ?'
+  );
+  const upsertPatientMemoryStmt = db.prepare(
+    `INSERT INTO patient_memory (phone, summary, turns_at_update, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(phone) DO UPDATE SET
+       summary = excluded.summary,
+       turns_at_update = excluded.turns_at_update,
+       updated_at = datetime('now')`
+  );
+  const deletePatientMemoryStmt = db.prepare(
+    'DELETE FROM patient_memory WHERE phone = ?'
+  );
+
   function ensurePatient(phone) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) throw new Error('Phone is required');
@@ -513,8 +547,10 @@ function createDatabase(config) {
       db.prepare(`DELETE FROM patients WHERE phone = ?`).run(phone);
     }
 
-    // Always clear conversation history for this phone, even if no patient row exists yet.
+    // Always clear conversation history and long-term memory for this phone,
+    // even if no patient row exists yet.
     deleteConversationTurnsByPhoneStmt.run(phone);
+    deletePatientMemoryStmt.run(phone);
 
     return patientIds.length;
   });
@@ -827,6 +863,27 @@ function createDatabase(config) {
     pruneConversationTurnsByAgeStmt.run(`-${seconds} seconds`);
   }
 
+  // --- Long-term memory (Fase 5) ---
+
+  function getPatientMemory(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return null;
+    return getPatientMemoryStmt.get(cleanPhone) || null;
+  }
+
+  function upsertPatientMemory(phone, summary, turnsAtUpdate = 0) {
+    const cleanPhone = String(phone || '').trim();
+    const cleanSummary = String(summary || '').trim();
+    if (!cleanPhone || !cleanSummary) return;
+    upsertPatientMemoryStmt.run(cleanPhone, cleanSummary, Math.max(0, Number(turnsAtUpdate) || 0));
+  }
+
+  function clearPatientMemory(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return;
+    deletePatientMemoryStmt.run(cleanPhone);
+  }
+
   // --- CRM auth ---
 
   function hashPassword(password) {
@@ -923,6 +980,8 @@ function createDatabase(config) {
     // Conversation memory
     appendConversationTurn, getRecentConversationTurns,
     clearConversationTurns, pruneConversationTurns,
+    // Long-term memory
+    getPatientMemory, upsertPatientMemory, clearPatientMemory,
     close,
   };
 }

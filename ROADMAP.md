@@ -1,7 +1,7 @@
 # Roadmap de mejoras — wa-bot (bot + CRM)
 
 Estado del documento: vivo. Cada fase se planifica en detalle y se aprueba antes de implementar.
-Última actualización: 2026-06-17.
+Última actualización: 2026-06-18.
 
 ## Contexto
 
@@ -19,13 +19,38 @@ identificados:
 | 1 | Persistencia de memoria IA en SQLite + rehidratación | Medio | 🔴 Alto | ✅ Hecho |
 | 2 | Seguridad: firma webhook + hash scrypt + JWT + PII logs | Bajo | 🔴 Alto | ✅ Hecho |
 | 3 | Funciones WhatsApp: botones/listas + recibir audio | Medio | 🟠 Alto | ✅ Hecho |
-| 4 | Plantillas (templates) + recordatorios por WhatsApp | Medio | 🟠 Alto | ⬜ Pendiente |
-| 5 | Memoria resumida de largo plazo | Medio | 🟢 Medio | ⬜ Pendiente |
-| 6 | Limpieza: tests, índices, CLAUDE.md, refactor webhook | Medio | 🟢 Medio | ⬜ Pendiente |
+| 4 | Plantillas (templates) + recordatorios por WhatsApp | Medio | 🟠 Alto | ✅ Hecho |
+| 5 | Memoria resumida de largo plazo | Medio | 🟢 Medio | ✅ Hecho |
+| 6 | Limpieza: tests, índices, CLAUDE.md, refactor webhook | Medio | 🟢 Medio | ✅ Hecho |
 
 Leyenda estado: ⬜ Pendiente · 📋 En planificación · 🚧 En curso · ✅ Hecho
 
 ---
+
+## Resumen de la sesión (2026-06-18)
+
+Se completaron las **Fases 4, 5 y 6** (las últimas pendientes). Verificado con `npm test` →
+**69/69 tests pasan**. Archivos nuevos: `src/services/memory.js`, `src/services/reminders.js`,
+`src/handlers/menuHandler.js`, `src/utils/text.js`, `src/utils/intent.js`, `src/utils/dateFormat.js`,
+y los suites `tests/memory.test.js`, `tests/reminders.test.js`, `tests/utils.test.js`,
+`tests/whatsapp.template.test.js`, `tests/menuHandler.test.js`. El roadmap queda completo.
+
+### Acciones de configuración opcionales (en el `.env` del VPS)
+
+Todas tienen default razonable; no bloquean el arranque:
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `WHATSAPP_REMINDER_TEMPLATE` | Plantilla aprobada para recordatorios fuera de la ventana de 24h. Si está vacía, se intenta texto plano (solo funciona dentro de la ventana). | (vacío) |
+| `WHATSAPP_REMINDERS` | Recordatorios de cita por WhatsApp al paciente. | `true` |
+| `EMAIL_REMINDERS` | Recordatorios de cita por email a la clínica. | `true` |
+| `BOT_REMINDER_MESSAGE` | Texto del recordatorio (`{nombre}`, `{fecha}`, `{hora}`). | mensaje por defecto |
+| `LONGTERM_MEMORY` | Memoria resumida de largo plazo por paciente. | `true` |
+| `MEMORY_SUMMARY_EVERY_TURNS` | Cada cuántos turnos se refresca el resumen. | `10` |
+
+**Nota plantillas:** `WHATSAPP_REMINDER_TEMPLATE` debe crearse y aprobarse en **Meta → WhatsApp Manager →
+Plantillas** con 3 parámetros de cuerpo en este orden: nombre, fecha, hora. Sin plantilla, el recordatorio
+solo llegará a pacientes que hayan escrito en las últimas 24h.
 
 ## Resumen de la sesión (2026-06-17)
 
@@ -125,14 +150,42 @@ conversación aunque los datos del paciente sí persistan en SQLite.
 
 ## Fase 4 — Plantillas + recordatorios WhatsApp
 
-- Soporte de mensajes de plantilla (necesario fuera de la ventana de 24h).
-- Recordatorios de cita por WhatsApp (hoy solo por email).
+**Implementado (2026-06-18):**
+- **Plantillas**: `whatsapp.sendTemplate(to, { name, languageCode, components })` para mensajes de
+  plantilla aprobados (necesarios fuera de la ventana de 24h).
+- **Recordatorios por WhatsApp**: `src/services/reminders.js` (`createReminderService`) ahora notifica
+  al paciente por WhatsApp además de avisar a la clínica por email. Usa plantilla si
+  `WHATSAPP_REMINDER_TEMPLATE` está configurada; si no, intenta texto plano. La cita se marca como
+  recordada si al menos un canal tuvo éxito. El scheduler de `app.js` delega en este servicio.
+
+**Variables `.env` nuevas:** `WHATSAPP_REMINDERS=true`, `WHATSAPP_REMINDER_TEMPLATE` (vacío → texto),
+`WHATSAPP_REMINDER_TEMPLATE_LANG=es`, `EMAIL_REMINDERS=true`, `BOT_REMINDER_MESSAGE` (placeholders
+`{nombre}`, `{fecha}`, `{hora}`).
 
 ## Fase 5 — Memoria resumida de largo plazo
 
-- Resumen persistente por paciente inyectado en el system prompt.
+**Implementado (2026-06-18):**
+- Tabla `patient_memory` (phone, summary, turns_at_update, updated_at) + métodos en `database.js`
+  (`getPatientMemory`, `upsertPatientMemory`, `clearPatientMemory`). `resetPatient` también la borra.
+- `gemini.summarizeConversation({ previousSummary, turns })` genera un resumen acumulativo;
+  builders de prompt en `botPrompt.js` (`buildSummarizationInstruction/Prompt`, `buildMemorySystemSuffix`).
+- `src/services/memory.js` (`createMemoryService`): `getSummary` para inyectar y `noteTurn` que refresca
+  el resumen en segundo plano cada `MEMORY_SUMMARY_EVERY_TURNS` turnos. El resumen se inyecta en el
+  system prompt del fallback de conversación general (estado COMPLETED).
+
+**Variables `.env` nuevas:** `LONGTERM_MEMORY=true`, `MEMORY_SUMMARY_EVERY_TURNS=10`.
 
 ## Fase 6 — Limpieza
 
-- Índices en `patients.phone`, `consultations.phone`, `appointments.appointment_date`.
-- Tests y lint. Actualizar `CLAUDE.md`. Modularizar `webhook.js`.
+**Implementado (2026-06-18):**
+- **Índices**: `idx_patients_phone`, `idx_consultations_phone`, `idx_appointments_date`,
+  `idx_appointments_phone` (además del ya existente `idx_conv_turns_phone`).
+- **Modularización de `webhook.js`**: helpers de texto a `src/utils/text.js`, detección de intención a
+  `src/utils/intent.js`, formato de fechas en español a `src/utils/dateFormat.js`, y el menú del estado
+  COMPLETED a `src/handlers/menuHandler.js`. El webhook quedó considerablemente más corto.
+- **Tests**: nuevos suites `memory.test.js`, `reminders.test.js`, `utils.test.js`,
+  `whatsapp.template.test.js`, `menuHandler.test.js`. Total **69/69 tests pasan**.
+- **`CLAUDE.md`** actualizado (comando de tests, tablas nuevas, variables y archivos clave).
+
+**Pendiente/evaluar (fuera de alcance):** recibir imágenes/documentos por WhatsApp; persistir
+`dedupStore` (bajo valor). Falta `lint` configurado.
