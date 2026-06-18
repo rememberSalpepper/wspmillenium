@@ -134,9 +134,33 @@ function createGeminiService(config) {
     return generateText({ contents });
   }
 
+  // data: base64-encoded audio bytes. Returns the transcribed text.
+  async function transcribeAudio({ data, mimeType }) {
+    const contents = [
+      {
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: mimeType || 'audio/ogg', data } },
+          {
+            text:
+              'Transcribe este audio en español. Devuelve únicamente el texto transcrito, ' +
+              'sin comentarios ni explicaciones.',
+          },
+        ],
+      },
+    ];
+
+    return generateText({
+      contents,
+      systemInstruction:
+        'Eres un transcriptor de audio. Devuelve solo la transcripción literal del audio en español.',
+    });
+  }
+
   return {
     generateText,
     generateReply,
+    transcribeAudio,
     isGeminiQuotaError,
     isTransientError,
   };

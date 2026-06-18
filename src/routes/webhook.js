@@ -2,6 +2,7 @@ const express = require('express');
 const { log } = require('../logger');
 const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
 const { FLOW_STATES, isFormCollectionState } = require('../stores/patientFlowStore');
+const { verifyWebhookSignature } = require('../utils/signature');
 
 const RESTART_PATTERNS = [
   /\bformulario\b/,
@@ -142,12 +143,37 @@ async function deliverReply({
   successEvent,
   errorEvent,
   logData = {},
+  interactive = null,
+  interactiveEnabled = false,
 }) {
   const cleanBody = String(body || '').trim();
   if (!cleanBody) return false;
 
   try {
-    const waResponse = await whatsappService.sendText(from, cleanBody);
+    let waResponse;
+
+    if (interactive && interactiveEnabled) {
+      try {
+        if (interactive.type === 'buttons') {
+          waResponse = await whatsappService.sendInteractiveButtons(from, cleanBody, interactive.buttons);
+        } else if (interactive.type === 'list') {
+          waResponse = await whatsappService.sendInteractiveList(
+            from,
+            cleanBody,
+            interactive.button,
+            interactive.rows
+          );
+        } else {
+          waResponse = await whatsappService.sendText(from, cleanBody);
+        }
+      } catch (interactiveErr) {
+        // Fallback to plain text so the bot never goes silent on interactive errors.
+        logError('whatsapp.interactive_send_error', interactiveErr, { msgId, from });
+        waResponse = await whatsappService.sendText(from, cleanBody);
+      }
+    } else {
+      waResponse = await whatsappService.sendText(from, cleanBody);
+    }
 
     conversationStore.append(from, 'assistant', cleanBody);
 
@@ -228,6 +254,26 @@ function createWebhookRouter({
 }) {
   const router = express.Router();
 
+  let warnedSignatureDisabled = false;
+
+  function checkSignature(req) {
+    if (!config.APP_SECRET) {
+      if (!warnedSignatureDisabled) {
+        log('warn', 'webhook.signature_disabled', {
+          message: 'APP_SECRET no configurado; verificación de firma del webhook deshabilitada.',
+        });
+        warnedSignatureDisabled = true;
+      }
+      return true;
+    }
+
+    return verifyWebhookSignature(
+      req.rawBody,
+      req.get('x-hub-signature-256'),
+      config.APP_SECRET
+    );
+  }
+
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -247,6 +293,13 @@ function createWebhookRouter({
   });
 
   router.post('/', (req, res) => {
+    if (!checkSignature(req)) {
+      log('warn', 'webhook.invalid_signature', {
+        hasHeader: Boolean(req.get('x-hub-signature-256')),
+      });
+      return res.sendStatus(401);
+    }
+
     res.sendStatus(200);
 
     try {
@@ -291,7 +344,7 @@ function createWebhookRouter({
     const from = message?.from || null;
     const type = message?.type || null;
     const timestamp = message?.timestamp || null;
-    const text = message?.text?.body ?? '';
+    let text = message?.text?.body ?? '';
 
     if (!msgId || !from) {
       log('info', 'inbound.ignored_missing_fields', {
@@ -316,7 +369,81 @@ function createWebhookRouter({
       }
     }
 
-    if (type !== 'text') {
+    // Dedup and stale checks up-front so heavy work (audio transcription) is not repeated.
+    if (!dedupStore.addIfNew(msgId)) {
+      log('info', 'inbound.duplicate_ignored', {
+        msgId,
+        from,
+      });
+      return;
+    }
+
+    if (isStaleMessage(timestamp, config.MESSAGE_MAX_AGE_SECONDS)) {
+      log('info', 'inbound.stale_ignored', {
+        msgId,
+        from,
+        timestamp,
+        maxAgeSeconds: config.MESSAGE_MAX_AGE_SECONDS,
+      });
+      return;
+    }
+
+    // Interactive replies (buttons/lists): treat the reply id as the user's text
+    // so the existing numeric/keyword flow logic keeps working unchanged.
+    if (type === 'interactive') {
+      const interactive = message.interactive || {};
+      const reply = interactive.button_reply || interactive.list_reply || null;
+      text = String(reply?.id || '').trim();
+
+      if (!text) {
+        log('info', 'inbound.ignored_empty_interactive', { msgId, from });
+        return;
+      }
+
+      log('info', 'inbound.interactive_reply', { msgId, from, replyId: text });
+    }
+
+    // Voice notes / audio: transcribe with Gemini, then treat the transcription as text.
+    if (type === 'audio') {
+      try {
+        await whatsappService.markAsReadAndTyping(msgId);
+      } catch (_) {}
+
+      if (!config.WHATSAPP_AUDIO_TRANSCRIPTION) {
+        try {
+          await whatsappService.sendText(from, getUnsupportedMessageReply('audio'));
+        } catch (_) {}
+        return;
+      }
+
+      let transcription = '';
+      try {
+        const mediaId = message.audio?.id;
+        if (mediaId) {
+          const { buffer, mimeType } = await whatsappService.downloadMedia(mediaId);
+          transcription = await geminiService.transcribeAudio({
+            data: buffer.toString('base64'),
+            mimeType,
+          });
+        }
+      } catch (audioErr) {
+        logError('inbound.audio_transcription_error', audioErr, { msgId, from });
+      }
+
+      transcription = String(transcription || '').trim();
+      if (!transcription || transcription === 'No pude generar una respuesta.') {
+        try {
+          await whatsappService.sendText(from, getUnsupportedMessageReply('audio'));
+        } catch (_) {}
+        return;
+      }
+
+      log('info', 'inbound.audio_transcribed', { msgId, from, length: transcription.length });
+      text = transcription;
+    }
+
+    // Any other non-text type is unsupported.
+    if (type !== 'text' && type !== 'interactive' && type !== 'audio') {
       log('info', 'inbound.ignored_non_text', {
         msgId,
         from,
@@ -344,7 +471,6 @@ function createWebhookRouter({
         });
       }
 
-      
       return;
     }
 
@@ -354,24 +480,6 @@ function createWebhookRouter({
       log('info', 'inbound.ignored_empty_text', {
         msgId,
         from,
-      });
-      return;
-    }
-
-    if (!dedupStore.addIfNew(msgId)) {
-      log('info', 'inbound.duplicate_ignored', {
-        msgId,
-        from,
-      });
-      return;
-    }
-
-    if (isStaleMessage(timestamp, config.MESSAGE_MAX_AGE_SECONDS)) {
-      log('info', 'inbound.stale_ignored', {
-        msgId,
-        from,
-        timestamp,
-        maxAgeSeconds: config.MESSAGE_MAX_AGE_SECONDS,
       });
       return;
     }
@@ -784,6 +892,15 @@ function createWebhookRouter({
           conversationStore, whatsappService,
           successEvent: 'outbound.manage_appointment_sent',
           errorEvent: 'whatsapp.manage_appointment_error',
+          interactiveEnabled: config.WHATSAPP_INTERACTIVE,
+          interactive: {
+            type: 'buttons',
+            buttons: [
+              { id: '1', title: 'Cancelar cita' },
+              { id: '2', title: 'Reagendar' },
+              { id: '3', title: 'Volver' },
+            ],
+          },
         });
         return;
       }
@@ -805,6 +922,15 @@ function createWebhookRouter({
         conversationStore, whatsappService,
         successEvent: 'outbound.completed_menu_sent',
         errorEvent: 'whatsapp.completed_menu_error',
+        interactiveEnabled: config.WHATSAPP_INTERACTIVE,
+        interactive: {
+          type: 'buttons',
+          buttons: [
+            { id: '1', title: 'Nueva consulta' },
+            { id: '2', title: 'Estado de cita' },
+            { id: '3', title: 'Cancelar/reagendar' },
+          ],
+        },
       });
       return;
     }
@@ -867,6 +993,8 @@ function createWebhookRouter({
         whatsappService,
         successEvent: 'outbound.consultation_reply_sent',
         errorEvent: 'whatsapp.consultation_reply_send_error',
+        interactiveEnabled: config.WHATSAPP_INTERACTIVE,
+        interactive: consultationReply?.interactive || null,
         logData: {
           batchCount: batch.count,
           consultationId: consultationReply?.consultationId || null,

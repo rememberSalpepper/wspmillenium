@@ -103,6 +103,15 @@ const config = {
   CRM_USER: process.env.CRM_USER || 'admin',
   CRM_PASS: process.env.CRM_PASS || 'admin123',
   CRM_JWT_SECRET: process.env.CRM_JWT_SECRET || require('crypto').randomBytes(32).toString('hex'),
+  CRM_JWT_SECRET_PROVIDED: Boolean(process.env.CRM_JWT_SECRET),
+
+  // Security
+  APP_SECRET: process.env.APP_SECRET || process.env.META_APP_SECRET || '',
+  LOG_PII: toBoolean(process.env.LOG_PII, false),
+
+  // WhatsApp features
+  WHATSAPP_INTERACTIVE: toBoolean(process.env.WHATSAPP_INTERACTIVE, true),
+  WHATSAPP_AUDIO_TRANSCRIPTION: toBoolean(process.env.WHATSAPP_AUDIO_TRANSCRIPTION, true),
 
   // Appointments
   APPOINTMENT_SLOT_DURATION: toNumber(process.env.APPOINTMENT_SLOT_DURATION, 30),

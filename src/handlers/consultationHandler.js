@@ -175,6 +175,50 @@ function buildSlotsMessage(slots) {
   return lines.join('\n');
 }
 
+// --- Interactive (buttons / lists) helpers ---
+
+function slotsListInteractive(slots) {
+  return {
+    type: 'list',
+    button: 'Ver horarios',
+    rows: slots.map((slot, i) => ({ id: String(i + 1), title: formatSlotDate(slot) })),
+  };
+}
+
+// Reply that shows the available slots as both text (fallback) and an interactive list.
+function slotsReply(slots) {
+  return {
+    body: buildSlotsMessage(slots),
+    skipWordLimit: true,
+    interactive: slotsListInteractive(slots),
+  };
+}
+
+const AGENDAR_BUTTONS = {
+  type: 'buttons',
+  buttons: [
+    { id: 'si', title: 'Sí, agendar' },
+    { id: 'no', title: 'No por ahora' },
+  ],
+};
+
+const CONFIRM_SLOT_BUTTONS = {
+  type: 'buttons',
+  buttons: [
+    { id: 'si', title: 'Sí, confirmar' },
+    { id: 'no', title: 'Ver otras horas' },
+  ],
+};
+
+const MANAGE_APPOINTMENT_BUTTONS = {
+  type: 'buttons',
+  buttons: [
+    { id: '1', title: 'Cancelar cita' },
+    { id: '2', title: 'Reagendar' },
+    { id: '3', title: 'Volver' },
+  ],
+};
+
 function getTodayStr() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
 }
@@ -230,7 +274,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       }
 
       patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_APPOINTMENT, { slots });
-      return { body: buildSlotsMessage(slots), skipWordLimit: true };
+      return slotsReply(slots);
     }
 
     if (isNegative(prompt)) {
@@ -241,6 +285,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
     return {
       body: 'Responda "si" si desea agendar una hora con el doctor, o "no" si prefiere no agendar por ahora.',
+      interactive: AGENDAR_BUTTONS,
     };
   }
 
@@ -257,7 +302,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     const num = parseInt(trimmed, 10);
 
     if (Number.isNaN(num) || num < 1 || num > slots.length) {
-      return { body: buildSlotsMessage(slots), skipWordLimit: true };
+      return slotsReply(slots);
     }
 
     const selectedSlot = slots[num - 1];
@@ -272,7 +317,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       'Confirma esta hora? (si/no)',
     ].join('\n');
 
-    return { body: confirmMsg };
+    return { body: confirmMsg, interactive: CONFIRM_SLOT_BUTTONS };
   }
 
   function handleConfirmingAppointment({ phone, prompt }) {
@@ -302,7 +347,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       }
 
       patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_APPOINTMENT, { slots: freshSlots });
-      return { body: buildSlotsMessage(freshSlots), skipWordLimit: true };
+      return slotsReply(freshSlots);
     }
 
     if (isAffirmative(prompt)) {
@@ -336,6 +381,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
         return {
           body: `Lo sentimos, ese horario ya no esta disponible. Elija otro:\n\n${buildSlotsMessage(freshSlots)}`,
           skipWordLimit: true,
+          interactive: slotsListInteractive(freshSlots),
         };
       }
 
@@ -374,6 +420,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
     return {
       body: 'Responda "si" para confirmar la hora, o "no" para ver otras opciones.',
+      interactive: CONFIRM_SLOT_BUTTONS,
     };
   }
 
@@ -427,7 +474,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
         slots,
         appointmentId: appointment.id,
       });
-      return { body: buildSlotsMessage(slots), skipWordLimit: true };
+      return slotsReply(slots);
     }
 
     if (trimmed === '3' || /\bvolver\b/.test(normalized) || isNegative(prompt)) {
@@ -437,6 +484,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
     return {
       body: 'Responda con el número de la opción:\n1) Cancelar cita\n2) Reagendar cita\n3) Volver',
+      interactive: MANAGE_APPOINTMENT_BUTTONS,
     };
   }
 
@@ -462,7 +510,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       const num = parseInt(trimmed, 10);
 
       if (Number.isNaN(num) || num < 1 || num > slots.length) {
-        return { body: buildSlotsMessage(slots), skipWordLimit: true };
+        return slotsReply(slots);
       }
 
       const selectedSlot = slots[num - 1];
@@ -476,6 +524,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
 
       return {
         body: `Ha seleccionado: ${formatSlotDate(selectedSlot)}\n¿Confirma reagendar a esta hora? (si/no)`,
+        interactive: CONFIRM_SLOT_BUTTONS,
       };
     }
 
@@ -502,7 +551,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
           slots: freshSlots,
           appointmentId,
         });
-        return { body: buildSlotsMessage(freshSlots), skipWordLimit: true };
+        return slotsReply(freshSlots);
       }
 
       if (isAffirmative(prompt)) {
@@ -536,7 +585,10 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
         };
       }
 
-      return { body: 'Responda "si" para confirmar la hora, o "no" para ver otras opciones.' };
+      return {
+        body: 'Responda "si" para confirmar la hora, o "no" para ver otras opciones.',
+        interactive: CONFIRM_SLOT_BUTTONS,
+      };
     }
 
     patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
@@ -621,6 +673,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       body: summary,
       consultationId,
       skipWordLimit: true,
+      interactive: AGENDAR_BUTTONS,
     };
   }
 

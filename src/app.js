@@ -47,7 +47,16 @@ log('info', 'config.ok', {
 });
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
+const database = createDatabase(config);
 
 const dedupStore = new DedupStore({
   ttlMs: config.DEDUP_TTL_MS,
@@ -57,6 +66,7 @@ const conversationStore = new ConversationStore({
   ttlMs: config.CONVERSATION_TTL_MS,
   maxTurns: config.CONTEXT_MAX_TURNS,
   maxChars: config.CONTEXT_MAX_CHARS,
+  database,
 });
 
 const senderQueue = new SenderQueue();
@@ -65,7 +75,6 @@ const inboundBufferStore = new InboundBufferStore({
   bufferMs: config.MESSAGE_BUFFER_MS,
 });
 
-const database = createDatabase(config);
 const whatsappService = createWhatsAppService(config);
 const geminiService = createGeminiService(config);
 const patientFlowStore = new PatientFlowStore({
@@ -90,6 +99,16 @@ const consultationHandler = createConsultationHandler({
 database.ensureDefaultCrmUser(config.CRM_USER, config.CRM_PASS);
 if (config.CRM_PASS === 'admin123') {
   log('warn', 'crm.default_password', { message: 'Using default CRM password. Set CRM_PASS in .env for production.' });
+}
+if (!config.CRM_JWT_SECRET_PROVIDED) {
+  log('warn', 'crm.jwt_secret_missing', {
+    message: 'CRM_JWT_SECRET no configurado; se usa un secreto aleatorio que cambia en cada reinicio (cierra todas las sesiones del CRM). Define CRM_JWT_SECRET en .env.',
+  });
+}
+if (!config.APP_SECRET) {
+  log('warn', 'webhook.app_secret_missing', {
+    message: 'APP_SECRET no configurado; la verificación de firma del webhook está deshabilitada. Define APP_SECRET en .env.',
+  });
 }
 
 app.get('/health', (req, res) => {
@@ -174,6 +193,7 @@ setInterval(() => {
   dedupStore.cleanup();
   conversationStore.cleanup();
   patientFlowStore.cleanup();
+  database.pruneConversationTurns(config.CONVERSATION_TTL_MS);
 }, 5 * 60 * 1000).unref();
 
 // Appointment reminder scheduler — checks every 5 min for appointments in the next hour

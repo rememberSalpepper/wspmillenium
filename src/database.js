@@ -161,6 +161,19 @@ function createDatabase(config) {
     db.exec("ALTER TABLE appointments ADD COLUMN reminder_sent INTEGER DEFAULT 0");
   }
 
+  // Conversation history (AI memory) — persisted so it survives restarts/redeploys
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT NOT NULL,
+      role TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conv_turns_phone ON conversation_turns(phone, id);
+  `);
+
   // Seed default doctor schedule if empty
   const scheduleCount = db.prepare('SELECT COUNT(*) as total FROM doctor_schedule').get().total;
   if (scheduleCount === 0) {
@@ -249,6 +262,9 @@ function createDatabase(config) {
   const getCrmUserStmt = db.prepare('SELECT * FROM crm_users WHERE username = ?');
   const insertCrmUserStmt = db.prepare(
     'INSERT INTO crm_users (username, password_hash) VALUES (?, ?)'
+  );
+  const updateCrmUserPasswordStmt = db.prepare(
+    'UPDATE crm_users SET password_hash = ? WHERE username = ?'
   );
   const countCrmUsersStmt = db.prepare('SELECT COUNT(*) as total FROM crm_users');
   const getDashboardStatsStmt = db.prepare(`
@@ -346,6 +362,27 @@ function createDatabase(config) {
   // --- Search patients ---
   const searchPatientsStmt = db.prepare(
     "SELECT * FROM patients WHERE form_completed = 1 AND (nombre LIKE ? OR rut LIKE ? OR phone LIKE ? OR telefono LIKE ?) ORDER BY updated_at DESC LIMIT ?"
+  );
+
+  // --- Conversation turns (AI memory) ---
+  const insertConversationTurnStmt = db.prepare(
+    'INSERT INTO conversation_turns (phone, role, text) VALUES (?, ?, ?)'
+  );
+  const getRecentConversationTurnsStmt = db.prepare(
+    'SELECT role, text, created_at FROM conversation_turns WHERE phone = ? ORDER BY id DESC LIMIT ?'
+  );
+  const deleteConversationTurnsByPhoneStmt = db.prepare(
+    'DELETE FROM conversation_turns WHERE phone = ?'
+  );
+  const pruneConversationTurnsByAgeStmt = db.prepare(
+    "DELETE FROM conversation_turns WHERE created_at < datetime('now', ?)"
+  );
+  const capConversationTurnsForPhoneStmt = db.prepare(
+    `DELETE FROM conversation_turns
+     WHERE phone = ?
+       AND id NOT IN (
+         SELECT id FROM conversation_turns WHERE phone = ? ORDER BY id DESC LIMIT ?
+       )`
   );
 
   function ensurePatient(phone) {
@@ -475,6 +512,9 @@ function createDatabase(config) {
         .run(...patientIds);
       db.prepare(`DELETE FROM patients WHERE phone = ?`).run(phone);
     }
+
+    // Always clear conversation history for this phone, even if no patient row exists yet.
+    deleteConversationTurnsByPhoneStmt.run(phone);
 
     return patientIds.length;
   });
@@ -748,20 +788,84 @@ function createDatabase(config) {
     return searchPatientsStmt.all(q, q, q, q, limit);
   }
 
+  // --- Conversation turns (AI memory) ---
+
+  // Hard cap of rows kept per phone so the table cannot grow unbounded.
+  const CONVERSATION_TURNS_CAP = 50;
+
+  const appendConversationTurnTx = db.transaction((phone, role, text) => {
+    insertConversationTurnStmt.run(phone, role, text);
+    capConversationTurnsForPhoneStmt.run(phone, phone, CONVERSATION_TURNS_CAP);
+  });
+
+  function appendConversationTurn(phone, role, text) {
+    const cleanPhone = String(phone || '').trim();
+    const cleanText = String(text || '').trim();
+    if (!cleanPhone || !cleanText) return;
+    const cleanRole = role === 'assistant' ? 'assistant' : 'user';
+    appendConversationTurnTx(cleanPhone, cleanRole, cleanText);
+  }
+
+  function getRecentConversationTurns(phone, limit = 12) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return [];
+    const safeLimit = Math.max(1, Number(limit) || 12);
+    // Stored newest-first; return oldest-first for chronological context.
+    return getRecentConversationTurnsStmt.all(cleanPhone, safeLimit).reverse();
+  }
+
+  function clearConversationTurns(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return;
+    deleteConversationTurnsByPhoneStmt.run(cleanPhone);
+  }
+
+  function pruneConversationTurns(maxAgeMs) {
+    const ms = Number(maxAgeMs);
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    const seconds = Math.floor(ms / 1000);
+    pruneConversationTurnsByAgeStmt.run(`-${seconds} seconds`);
+  }
+
   // --- CRM auth ---
 
   function hashPassword(password) {
     const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
-    return `${salt}:${hash}`;
+    const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+    return `scrypt:${salt}:${hash}`;
+  }
+
+  function timingSafeHexEqual(aHex, bHex) {
+    const a = Buffer.from(String(aHex), 'hex');
+    const b = Buffer.from(String(bHex), 'hex');
+    if (a.length === 0 || a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   }
 
   function verifyPassword(password, stored) {
-    if (!stored || !stored.includes(':')) return false;
-    const [salt, hash] = stored.split(':');
+    if (!stored) return false;
+
+    if (String(stored).startsWith('scrypt:')) {
+      const [, salt, hash] = String(stored).split(':');
+      if (!salt || !hash) return false;
+      const attempt = crypto.scryptSync(String(password), salt, 64).toString('hex');
+      return timingSafeHexEqual(attempt, hash);
+    }
+
+    // Legacy SHA-256 (format: salt:hash)
+    if (!String(stored).includes(':')) return false;
+    const [salt, hash] = String(stored).split(':');
     if (!salt || !hash) return false;
     const attempt = crypto.createHash('sha256').update(salt + password).digest('hex');
-    return attempt === hash;
+    return timingSafeHexEqual(attempt, hash);
+  }
+
+  function isLegacyPasswordHash(stored) {
+    return Boolean(stored) && !String(stored).startsWith('scrypt:');
+  }
+
+  function updateCrmUserPassword(username, password) {
+    updateCrmUserPasswordStmt.run(hashPassword(password), username);
   }
 
   function getCrmUser(username) {
@@ -803,7 +907,7 @@ function createDatabase(config) {
     getAllPatients, getConsultationsByPatient, getConsultationById,
     getDashboardStats, searchPatients,
     getCrmUser, createCrmUser, ensureDefaultCrmUser,
-    verifyPassword,
+    verifyPassword, isLegacyPasswordHash, updateCrmUserPassword,
     // Schedule
     getWeeklySchedule, addScheduleBlock, updateScheduleBlock,
     deactivateScheduleBlock, activateScheduleBlock, deleteScheduleBlock,
@@ -816,6 +920,9 @@ function createDatabase(config) {
     getTodayAppointments, getUpcomingAppointments,
     getAvailableSlots, getScheduledAppointmentsByPhone,
     getAppointmentsNeedingReminder, markReminderSent,
+    // Conversation memory
+    appendConversationTurn, getRecentConversationTurns,
+    clearConversationTurns, pruneConversationTurns,
     close,
   };
 }

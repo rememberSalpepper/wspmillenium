@@ -1,8 +1,9 @@
 class ConversationStore {
-  constructor({ ttlMs, maxTurns, maxChars }) {
+  constructor({ ttlMs, maxTurns, maxChars, database = null }) {
     this.ttlMs = ttlMs;
     this.maxTurns = maxTurns;
     this.maxChars = maxChars;
+    this.database = database;
     this.sessions = new Map();
   }
 
@@ -16,6 +17,18 @@ class ConversationStore {
     }
   }
 
+  // Load persisted turns from the database (oldest-first) into the in-memory shape.
+  loadTurnsFromDb(id) {
+    if (!this.database?.getRecentConversationTurns) return [];
+
+    const rows = this.database.getRecentConversationTurns(id, this.maxTurns);
+    return rows.map((row) => ({
+      role: row.role,
+      text: row.text,
+      at: row.created_at || new Date().toISOString(),
+    }));
+  }
+
   getSession(id) {
     this.cleanup();
 
@@ -24,7 +37,7 @@ class ConversationStore {
 
     if (!existing || now - existing.lastTouchedAt > this.ttlMs) {
       const fresh = {
-        turns: [],
+        turns: this.loadTurnsFromDb(id),
         lastTouchedAt: now,
       };
 
@@ -40,9 +53,15 @@ class ConversationStore {
     this.cleanup();
 
     const existing = this.sessions.get(id);
-    if (!existing) return null;
+    if (existing) return existing;
 
-    return existing;
+    // Cache miss (e.g. after a restart): rehydrate from the database if available.
+    const turns = this.loadTurnsFromDb(id);
+    if (turns.length === 0) return null;
+
+    const session = { turns, lastTouchedAt: Date.now() };
+    this.sessions.set(id, session);
+    return session;
   }
 
   trimTurns(turns) {
@@ -80,6 +99,11 @@ class ConversationStore {
 
     session.turns = this.trimTurns(session.turns);
     session.lastTouchedAt = Date.now();
+
+    // Write-through to the database so memory survives restarts.
+    if (this.database?.appendConversationTurn) {
+      this.database.appendConversationTurn(id, role, cleanText);
+    }
   }
 
   hasTurns(id) {
@@ -94,6 +118,10 @@ class ConversationStore {
 
   clear(id) {
     this.sessions.delete(id);
+
+    if (this.database?.clearConversationTurns) {
+      this.database.clearConversationTurns(id);
+    }
   }
 
   buildContents(id) {

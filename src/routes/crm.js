@@ -22,6 +22,16 @@ function createCrmRouter({ config, database, whatsappService }) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
+    // Transparent upgrade: re-hash legacy SHA-256 passwords to scrypt on login.
+    if (database.isLegacyPasswordHash(user.password_hash)) {
+      try {
+        database.updateCrmUserPassword(user.username, password);
+        log('info', 'crm.password_rehashed', { username: user.username });
+      } catch (err) {
+        log('error', 'crm.password_rehash_failed', { username: user.username, error: err?.message });
+      }
+    }
+
     const token = jwt.sign(
       { id: user.id, username: user.username },
       config.CRM_JWT_SECRET,
