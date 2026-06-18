@@ -37,6 +37,10 @@ const MANAGE_BUTTONS = {
 // Handles the COMPLETED-state main menu (post-consultation interactions).
 // Returns a reply descriptor; the webhook is responsible for delivery.
 function createMenuHandler({ database, patientFlowStore, conversationStore, config }) {
+  const footer = (config && config.CLINIC_NAME) || undefined;
+  const menuButtons = { ...MENU_BUTTONS, header: '🏥 ¿En qué le ayudamos?', footer };
+  const manageButtons = { ...MANAGE_BUTTONS, header: '🗂️ Gestionar mi cita', footer };
+
   function handleMessage({ phone, prompt }) {
     const trimmed = String(prompt || '').trim();
 
@@ -131,7 +135,7 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
       return {
         body: msg,
         skipWordLimit: true,
-        interactive: MANAGE_BUTTONS,
+        interactive: manageButtons,
         successEvent: 'outbound.manage_appointment_sent',
         errorEvent: 'whatsapp.manage_appointment_error',
       };
@@ -140,7 +144,7 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
     // Any other message → show menu.
     return {
       body: MENU_MESSAGE,
-      interactive: MENU_BUTTONS,
+      interactive: menuButtons,
       successEvent: 'outbound.completed_menu_sent',
       errorEvent: 'whatsapp.completed_menu_error',
     };

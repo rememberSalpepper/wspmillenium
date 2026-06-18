@@ -58,6 +58,49 @@ describe('sendInteractiveList', () => {
     expect(payload.interactive.action.sections[0].rows).toHaveLength(2);
     expect(payload.interactive.action.sections[0].rows[0]).toEqual({ id: '1', title: 'Lun 09:00' });
   });
+
+  test('attaches header and footer when provided', async () => {
+    const wa = createWhatsAppService(config);
+    await wa.sendInteractiveList('569', 'Elige día', 'Ver días', [{ id: '1', title: 'Lun 18' }], {
+      header: 'Agendar hora',
+      footer: 'Consultas Milenium',
+    });
+
+    const payload = axios.post.mock.calls[0][1];
+    expect(payload.interactive.header).toEqual({ type: 'text', text: 'Agendar hora' });
+    expect(payload.interactive.footer).toEqual({ text: 'Consultas Milenium' });
+  });
+
+  test('uses explicit sections and caps total rows at 10', async () => {
+    const wa = createWhatsAppService(config);
+    const manyRows = Array.from({ length: 8 }, (_, i) => ({ id: String(i), title: `r${i}` }));
+    await wa.sendInteractiveList('569', 'b', 'Ver', null, {
+      sections: [
+        { title: 'Mañana', rows: manyRows },
+        { title: 'Tarde', rows: manyRows },
+      ],
+    });
+
+    const payload = axios.post.mock.calls[0][1];
+    const sections = payload.interactive.action.sections;
+    const totalRows = sections.reduce((sum, s) => sum + s.rows.length, 0);
+    expect(totalRows).toBe(10);
+    expect(sections[0].title).toBe('Mañana');
+  });
+});
+
+describe('sendInteractiveButtons header/footer', () => {
+  test('attaches header and footer when provided', async () => {
+    const wa = createWhatsAppService(config);
+    await wa.sendInteractiveButtons('569', 'Confirmar', [{ id: 'si', title: 'Sí' }], {
+      header: 'Confirmar hora',
+      footer: 'Consultas Milenium',
+    });
+
+    const payload = axios.post.mock.calls[0][1];
+    expect(payload.interactive.header).toEqual({ type: 'text', text: 'Confirmar hora' });
+    expect(payload.interactive.footer).toEqual({ text: 'Consultas Milenium' });
+  });
 });
 
 describe('downloadMedia', () => {

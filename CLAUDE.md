@@ -44,9 +44,11 @@ WhatsApp Webhook POST
 
 ### State Machine (patientFlowStore.js)
 
-Patient flow states drive everything: `WELCOME → COLLECTING_RUT → COLLECTING_NOMBRE → COLLECTING_CORREO → COLLECTING_TELEFONO → COLLECTING_DIRECCION → CONFIRMING_FORM → CONSULTATION → CONSULTATION_SUMMARY → AWAITING_APPOINTMENT → COMPLETED`
+Patient flow states drive everything: `WELCOME → COLLECTING_RUT → COLLECTING_NOMBRE → COLLECTING_CORREO → COLLECTING_TELEFONO → COLLECTING_DIRECCION → CONFIRMING_FORM → CONSULTATION → CONSULTATION_SUMMARY → AWAITING_APPOINTMENT → SELECTING_DAY → SELECTING_APPOINTMENT → CONFIRMING_APPOINTMENT → COMPLETED`
 
 State is derived from the database record (`deriveFlowStateFromPatient`), not stored separately. In-memory overrides exist for UI state (e.g., `CONFIRMING_FORM`).
+
+**Appointment booking is a two-step dropdown flow:** once the patient accepts (`AWAITING_APPOINTMENT`), the bot shows an interactive list of available **days** (`SELECTING_DAY`, built from `database.getAvailableDays`), then the **times** for the chosen day (`SELECTING_APPOINTMENT`, from `database.getSlotsForDate`), then a confirm step (`CONFIRMING_APPOINTMENT`). The time list includes an `otro_dia` row to go back to the day list. Rescheduling (`mode: 'reschedule'` carried in the flow-store state data, with `appointmentId`) reuses the exact same day→time path.
 
 ### AI Usage Pattern
 
@@ -96,6 +98,7 @@ Bot behavior is controlled entirely via environment variables — no code change
 | `CONTEXT_MAX_TURNS` | Conversation history turns (default 12) |
 | `GEMINI_TIMEOUT_MS` | Gemini request timeout (default 20000ms) |
 | `WHATSAPP_INTERACTIVE` | Interactive buttons/lists (default true) |
+| `CLINIC_NAME` | Clinic name shown as the footer on interactive messages (default `Consultas Milenium`) |
 | `WHATSAPP_AUDIO_TRANSCRIPTION` | Transcribe voice notes (default true) |
 | `WHATSAPP_REMINDERS` | Send appointment reminders via WhatsApp (default true) |
 | `WHATSAPP_REMINDER_TEMPLATE` | Approved template name for reminders (empty → plain text) |

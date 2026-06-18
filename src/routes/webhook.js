@@ -67,13 +67,21 @@ async function deliverReply({
     if (interactive && interactiveEnabled) {
       try {
         if (interactive.type === 'buttons') {
-          waResponse = await whatsappService.sendInteractiveButtons(from, cleanBody, interactive.buttons);
+          waResponse = await whatsappService.sendInteractiveButtons(from, cleanBody, interactive.buttons, {
+            header: interactive.header,
+            footer: interactive.footer,
+          });
         } else if (interactive.type === 'list') {
           waResponse = await whatsappService.sendInteractiveList(
             from,
             cleanBody,
             interactive.button,
-            interactive.rows
+            interactive.rows,
+            {
+              header: interactive.header,
+              footer: interactive.footer,
+              sections: interactive.sections,
+            }
           );
         } else {
           waResponse = await whatsappService.sendText(from, cleanBody);
@@ -706,6 +714,7 @@ function createWebhookRouter({
     if (
       flowState === FLOW_STATES.CONSULTATION ||
       flowState === FLOW_STATES.AWAITING_APPOINTMENT ||
+      flowState === FLOW_STATES.SELECTING_DAY ||
       flowState === FLOW_STATES.SELECTING_APPOINTMENT ||
       flowState === FLOW_STATES.CONFIRMING_APPOINTMENT ||
       flowState === FLOW_STATES.MANAGING_APPOINTMENT ||
