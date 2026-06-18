@@ -181,4 +181,44 @@ describe('two-step appointment flow (day → time)', () => {
     expect(updated.appointment_date).toBe(newSlot.date);
     expect(updated.appointment_time).toBe(newSlot.time);
   });
+
+  test('reschedule re-offers times if the chosen slot was taken before confirming', async () => {
+    const patient = database.getPatientByPhone(PHONE);
+    const days = database.getAvailableDays(todayStr(), 9, 30, 14);
+    const original = database.createAppointment({
+      patientId: patient.id,
+      phone: PHONE,
+      date: days[days.length - 1].date,
+      time: '17:30',
+      duration: 30,
+    });
+
+    patientFlowStore.setStateWithData(PHONE, FLOW_STATES.MANAGING_APPOINTMENT, {
+      appointment: database.getAppointmentById(original.id),
+    });
+
+    await handler.handleMessage({ phone: PHONE, prompt: '2' }); // reagendar → days
+    await handler.handleMessage({ phone: PHONE, prompt: '1' }); // pick day → times
+
+    const stateData = patientFlowStore.getStateData(PHONE);
+    const target = stateData.slots[0];
+    await handler.handleMessage({ phone: PHONE, prompt: '1' }); // pick first time
+
+    // Someone else grabs that exact slot before the patient confirms.
+    database.createAppointment({
+      patientId: patient.id,
+      phone: '56999999999',
+      date: target.date,
+      time: target.time,
+      duration: 30,
+    });
+
+    const blocked = await handler.handleMessage({ phone: PHONE, prompt: 'sí' });
+    expect(blocked.body).toMatch(/ya no est[áa] disponible/i);
+    expect(patientFlowStore.getState(PHONE)).toBe(FLOW_STATES.SELECTING_APPOINTMENT);
+
+    // Original appointment is untouched
+    const unchanged = database.getAppointmentById(original.id);
+    expect(unchanged.appointment_time).toBe('17:30');
+  });
 });

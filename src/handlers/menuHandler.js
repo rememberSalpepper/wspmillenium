@@ -38,8 +38,15 @@ const MANAGE_BUTTONS = {
 // Returns a reply descriptor; the webhook is responsible for delivery.
 function createMenuHandler({ database, patientFlowStore, conversationStore, config }) {
   const footer = (config && config.CLINIC_NAME) || undefined;
+  const interactiveOn = Boolean(config && config.WHATSAPP_INTERACTIVE);
   const menuButtons = { ...MENU_BUTTONS, header: '🏥 ¿En qué le ayudamos?', footer };
   const manageButtons = { ...MANAGE_BUTTONS, header: '🗂️ Gestionar mi cita', footer };
+
+  // With interactive buttons the numbered list is redundant; keep a short CTA and
+  // let the buttons carry the options. Without interactive, fall back to the list.
+  const menuBody = interactiveOn
+    ? '¿En qué puedo ayudarte? Elige una opción 👇'
+    : MENU_MESSAGE;
 
   function handleMessage({ phone, prompt }) {
     const trimmed = String(prompt || '').trim();
@@ -85,18 +92,30 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
       };
     }
 
-    // Menu option "2" → appointment status.
+    // Menu option "2" → appointment status (read from the real appointments
+    // table, consistent with option 3 — never from consultation.appointment_status).
     if (trimmed === '2') {
-      const lastConsultation = database.getLastConsultation(phone);
-      const statusMap = {
-        pending: 'pendiente de confirmación',
-        confirmed: 'confirmada, nos pondremos en contacto pronto',
-        declined: 'no agendada',
-      };
-      const statusText = statusMap[lastConsultation?.appointment_status] || 'sin información';
+      const scheduled = database.getScheduledAppointmentsByPhone(phone);
+
+      if (!scheduled || scheduled.length === 0) {
+        return {
+          body: 'No tienes citas agendadas actualmente.\n\nSi deseas agendar, escribe "1" para una nueva consulta.',
+          skipWordLimit: true,
+          successEvent: 'outbound.appointment_status_sent',
+          errorEvent: 'whatsapp.appointment_status_error',
+        };
+      }
+
+      const apt = scheduled[0];
+      const dateLabel = formatSpanishDate(apt.appointment_date, { withWeekday: true });
 
       return {
-        body: `Estado de su última cita: ${statusText}.`,
+        body: [
+          'Tu próxima cita está agendada:',
+          `📅 ${dateLabel}`,
+          `🕐 ${apt.appointment_time} hrs`,
+        ].join('\n'),
+        skipWordLimit: true,
         successEvent: 'outbound.appointment_status_sent',
         errorEvent: 'whatsapp.appointment_status_error',
       };
@@ -117,18 +136,19 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
       const apt = scheduled[0];
       const dateLabel = formatSpanishDate(apt.appointment_date, { withWeekday: true });
 
-      const msg = [
-        'Su próxima cita:',
+      const msgLines = [
+        'Tu próxima cita:',
         `📅 Fecha: ${dateLabel}`,
-        `🕐 Hora: ${apt.appointment_time}`,
+        `🕐 Hora: ${apt.appointment_time} hrs`,
         '',
-        '¿Qué desea hacer?',
-        '1) Cancelar cita',
-        '2) Reagendar cita',
-        '3) Volver',
-        '',
-        'Responda con el número de la opción.',
-      ].join('\n');
+        '¿Qué deseas hacer?',
+      ];
+      if (interactiveOn) {
+        msgLines.push('Elige una opción 👇');
+      } else {
+        msgLines.push('1) Cancelar cita', '2) Reagendar cita', '3) Volver', '', 'Responde con el número de la opción.');
+      }
+      const msg = msgLines.join('\n');
 
       patientFlowStore.setStateWithData(phone, FLOW_STATES.MANAGING_APPOINTMENT, { appointment: apt });
 
@@ -143,7 +163,7 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
 
     // Any other message → show menu.
     return {
-      body: MENU_MESSAGE,
+      body: menuBody,
       interactive: menuButtons,
       successEvent: 'outbound.completed_menu_sent',
       errorEvent: 'whatsapp.completed_menu_error',

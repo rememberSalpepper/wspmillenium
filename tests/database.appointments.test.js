@@ -138,12 +138,50 @@ describe('rescheduleAppointment', () => {
     });
 
     const newDate = getFutureDate(7);
-    database.rescheduleAppointment(id, newDate, '15:00');
+    const result = database.rescheduleAppointment(id, newDate, '15:00', 30);
+    expect(result.conflict).toBe(false);
 
     const updated = database.getAppointmentById(id);
     expect(updated.appointment_date).toBe(newDate);
     expect(updated.appointment_time).toBe('15:00');
     expect(updated.status).toBe('scheduled');
+  });
+
+  test('rejects rescheduling onto a slot taken by another appointment', () => {
+    const patient = database.getPatientByPhone('56912345678');
+    const date = getFutureDate(4);
+
+    // Another patient already holds 10:00
+    database.createAppointment({
+      patientId: patient.id, phone: '56999999999',
+      date, time: '10:00', duration: 30,
+    });
+
+    // The appointment we will try to move
+    const { id } = database.createAppointment({
+      patientId: patient.id, phone: '56912345678',
+      date, time: '12:00', duration: 30,
+    });
+
+    const result = database.rescheduleAppointment(id, date, '10:00', 30);
+    expect(result.conflict).toBe(true);
+
+    // Nothing changed
+    const unchanged = database.getAppointmentById(id);
+    expect(unchanged.appointment_time).toBe('12:00');
+  });
+
+  test('allows rescheduling to the appointment own current slot (no self-conflict)', () => {
+    const patient = database.getPatientByPhone('56912345678');
+    const date = getFutureDate(4);
+    const { id } = database.createAppointment({
+      patientId: patient.id, phone: '56912345678',
+      date, time: '09:00', duration: 30,
+    });
+
+    // Re-confirm the same slot — must not collide with itself
+    const result = database.rescheduleAppointment(id, date, '09:00', 30);
+    expect(result.conflict).toBe(false);
   });
 });
 

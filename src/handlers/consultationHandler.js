@@ -156,13 +156,19 @@ function formatDayShort(day) {
 // --- Day selection (step 1) ---
 
 // Reply that asks the patient which day they want, as an interactive dropdown list.
-function daysReply(days, { footer } = {}) {
-  const lines = ['📅 ¿Qué día prefiere su atención?', ''];
-  days.forEach((day, i) => {
-    lines.push(`${i + 1}) ${formatDayShort(day)}`);
-  });
-  lines.push('');
-  lines.push('Toque "Ver días" y elija una opción 👇');
+// With interactive on, the body is just a short CTA (the days live in the list);
+// without it, the numbered list is kept as a usable text fallback.
+function daysReply(days, { footer, interactive = true } = {}) {
+  let lines;
+  if (interactive) {
+    lines = ['📅 ¿Qué día prefieres tu atención?', '', 'Toca "Ver días" y elige una opción 👇'];
+  } else {
+    lines = ['📅 ¿Qué día prefieres tu atención?', ''];
+    days.forEach((day, i) => {
+      lines.push(`${i + 1}) ${formatDayShort(day)}`);
+    });
+    lines.push('', 'Responde con el número del día.');
+  }
 
   const rows = days.map((day, i) => ({
     id: String(i + 1),
@@ -187,15 +193,19 @@ function daysReply(days, { footer } = {}) {
 
 // Reply that shows the available times for one day as an interactive dropdown list.
 // Caps at 9 times so a "choose another day" row fits within WhatsApp's 10-row limit.
-function timesReply(times, dayLabelFull, { footer } = {}) {
+function timesReply(times, dayLabelFull, { footer, interactive = true } = {}) {
   const shown = times.slice(0, 9);
 
-  const lines = [`📅 ${dayLabelFull}`, '', 'Horarios disponibles:', ''];
-  shown.forEach((slot, i) => {
-    lines.push(`${i + 1}) 🕐 ${slot.time}`);
-  });
-  lines.push('');
-  lines.push('Toque "Ver horarios" y elija una opción 👇');
+  let lines;
+  if (interactive) {
+    lines = [`📅 ${dayLabelFull}`, '', 'Toca "Ver horarios" y elige una opción 👇'];
+  } else {
+    lines = [`📅 ${dayLabelFull}`, '', 'Horarios disponibles:', ''];
+    shown.forEach((slot, i) => {
+      lines.push(`${i + 1}) 🕐 ${slot.time}`);
+    });
+    lines.push('', 'Responde con el número del horario.');
+  }
 
   const rows = shown.map((slot, i) => ({
     id: String(i + 1),
@@ -258,6 +268,8 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
   }
 
   const footer = (config && config.CLINIC_NAME) || undefined;
+  const interactiveOn = Boolean(config && config.WHATSAPP_INTERACTIVE);
+  const replyOpts = { footer, interactive: interactiveOn };
 
   const AGENDAR_BUTTONS = {
     type: 'buttons',
@@ -308,7 +320,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     }
 
     patientFlowStore.setStateWithData(phone, FLOW_STATES.SELECTING_DAY, { days, ...extra });
-    return daysReply(days, { footer });
+    return daysReply(days, replyOpts);
   }
 
   // Step 2: show the available times for a chosen day as a dropdown list.
@@ -329,7 +341,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
       selectedDate,
       dayLabelFull,
     });
-    return timesReply(times, dayLabelFull, { footer });
+    return timesReply(times, dayLabelFull, replyOpts);
   }
 
   function handleAppointmentResponse({ phone, prompt }) {
@@ -362,7 +374,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     const num = parseInt(trimmed, 10);
 
     if (Number.isNaN(num) || num < 1 || num > days.length) {
-      return daysReply(days, { footer });
+      return daysReply(days, replyOpts);
     }
 
     const selectedDay = days[num - 1];
@@ -394,7 +406,7 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     const shownCount = Math.min(slots.length, 9);
 
     if (Number.isNaN(num) || num < 1 || num > shownCount) {
-      return timesReply(slots, stateData.dayLabelFull, { footer });
+      return timesReply(slots, stateData.dayLabelFull, replyOpts);
     }
 
     const selectedSlot = slots[num - 1];
@@ -475,7 +487,24 @@ function createConsultationHandler({ database, patientFlowStore, geminiService, 
     const appointmentId = stateData.appointmentId;
     const oldAppointment = database.getAppointmentById(appointmentId);
 
-    database.rescheduleAppointment(appointmentId, selectedSlot.date, selectedSlot.time);
+    const result = database.rescheduleAppointment(
+      appointmentId,
+      selectedSlot.date,
+      selectedSlot.time,
+      oldAppointment?.duration_min || slotDuration()
+    );
+
+    if (result && result.conflict) {
+      // Slot was taken between selection and confirmation; re-show the day's
+      // remaining times (or fall back to the day list).
+      log('info', 'appointment.reschedule_conflict', { phone, slot: selectedSlot });
+      const reply = showTimeSelection(phone, selectedSlot.date, stateData.dayLabelFull, stateData);
+      return {
+        ...reply,
+        body: `Lo sentimos, ese horario ya no está disponible. Elija otro 👇\n\n${reply.body}`,
+      };
+    }
+
     patientFlowStore.setState(phone, FLOW_STATES.COMPLETED);
 
     // Notify doctor via email

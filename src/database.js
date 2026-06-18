@@ -368,6 +368,11 @@ function createDatabase(config) {
   const getBookedSlotsForDateStmt = db.prepare(
     "SELECT appointment_time, duration_min FROM appointments WHERE appointment_date = ? AND status != 'cancelled'"
   );
+  // Same as above but excludes one appointment id — used when rescheduling so a
+  // cita is not treated as colliding with itself.
+  const getBookedSlotsForDateExcludingStmt = db.prepare(
+    "SELECT appointment_time, duration_min FROM appointments WHERE appointment_date = ? AND id != ? AND status != 'cancelled'"
+  );
   const getScheduleForDayStmt = db.prepare(
     'SELECT * FROM doctor_schedule WHERE day_of_week = ? AND is_active = 1 ORDER BY start_time'
   );
@@ -682,6 +687,24 @@ function createDatabase(config) {
     return createAppointmentTx(data);
   }
 
+  // Reschedule with the same overlap guard as createAppointmentTx, excluding the
+  // appointment's own row. Returns { conflict: true } without changing anything
+  // if the target slot is already taken by another cita.
+  const rescheduleAppointmentTx = db.transaction((id, newDate, newTime, duration) => {
+    const booked = getBookedSlotsForDateExcludingStmt.all(newDate, id);
+    const newStart = timeToMinutes(newTime);
+    const newEnd = newStart + (duration || 30);
+    for (const slot of booked) {
+      const sStart = timeToMinutes(slot.appointment_time);
+      const sEnd = sStart + (slot.duration_min || 30);
+      if (newStart < sEnd && newEnd > sStart) {
+        return { conflict: true };
+      }
+    }
+    rescheduleAppointmentStmt.run(newDate, newTime, id);
+    return { conflict: false };
+  });
+
   function getAppointmentById(id) {
     return getAppointmentByIdStmt.get(id) || null;
   }
@@ -698,8 +721,8 @@ function createDatabase(config) {
     updateAppointmentStmt.run(status, notes || null, id);
   }
 
-  function rescheduleAppointment(id, newDate, newTime) {
-    rescheduleAppointmentStmt.run(newDate, newTime, id);
+  function rescheduleAppointment(id, newDate, newTime, duration = 30) {
+    return rescheduleAppointmentTx(id, newDate, newTime, duration);
   }
 
   function getTodayAppointments() {

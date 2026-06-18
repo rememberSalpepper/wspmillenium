@@ -214,7 +214,17 @@ function createCrmRouter({ config, database, whatsappService }) {
     const patientName = patient?.nombre || 'paciente';
 
     if (appointment_date && appointment_time) {
-      database.rescheduleAppointment(id, appointment_date, appointment_time);
+      const result = database.rescheduleAppointment(
+        id,
+        appointment_date,
+        appointment_time,
+        apt.duration_min || 30
+      );
+
+      if (result && result.conflict) {
+        log('warn', 'crm.reschedule_conflict', { id, appointment_date, appointment_time });
+        return res.status(409).json({ error: 'slot_conflict', message: 'Ese horario ya está ocupado por otra cita.' });
+      }
 
       // Notify patient via WhatsApp
       if (whatsappService && apt.phone) {
