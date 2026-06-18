@@ -139,6 +139,9 @@ const config = {
   LONGTERM_MEMORY: toBoolean(process.env.LONGTERM_MEMORY, true),
   MEMORY_SUMMARY_EVERY_TURNS: toNumber(process.env.MEMORY_SUMMARY_EVERY_TURNS, 10),
 
+  // Clinic identity (used as footer in interactive WhatsApp messages)
+  CLINIC_NAME: process.env.CLINIC_NAME || 'Consultas Milenium',
+
   // Appointments
   APPOINTMENT_SLOT_DURATION: toNumber(process.env.APPOINTMENT_SLOT_DURATION, 30),
   APPOINTMENT_LOOKAHEAD_DAYS: toNumber(process.env.APPOINTMENT_LOOKAHEAD_DAYS, 14),

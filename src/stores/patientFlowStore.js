@@ -9,6 +9,7 @@ const FLOW_STATES = {
   CONSULTATION: 'consultation',
   CONSULTATION_SUMMARY: 'consultation_summary',
   AWAITING_APPOINTMENT: 'awaiting_appointment',
+  SELECTING_DAY: 'selecting_day',
   SELECTING_APPOINTMENT: 'selecting_appointment',
   CONFIRMING_APPOINTMENT: 'confirming_appointment',
   MANAGING_APPOINTMENT: 'managing_appointment',

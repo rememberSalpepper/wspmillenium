@@ -723,13 +723,76 @@ function createDatabase(config) {
     return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
   }
 
+  const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+
+  // Compute ALL available slots for a single date, honoring the weekly schedule,
+  // date-specific blocks, existing bookings and (for today) the current time.
+  function computeDaySlots(dateStr, dayOfWeek, slotDuration = 30) {
+    // Get schedule blocks for this day of week
+    const scheduleBlocks = getScheduleForDayStmt.all(dayOfWeek);
+    if (scheduleBlocks.length === 0) return [];
+
+    // Get date-specific blocks
+    const dateBlocks = getDateBlocksByDateStmt.all(dateStr);
+    const isFullDayBlocked = dateBlocks.some((b) => !b.start_time && !b.end_time);
+    if (isFullDayBlocked) return [];
+
+    // Get already booked slots
+    const booked = getBookedSlotsForDateStmt.all(dateStr);
+
+    const daySlots = [];
+    const now = new Date();
+    const nowChile = todayInChile();
+
+    for (const block of scheduleBlocks) {
+      const blockStart = timeToMinutes(block.start_time);
+      const blockEnd = timeToMinutes(block.end_time);
+      const dur = slotDuration || block.slot_duration_min || 30;
+
+      for (let t = blockStart; t + dur <= blockEnd; t += dur) {
+        const slotTime = minutesToTime(t);
+
+        // Skip past slots for today
+        if (dateStr === nowChile) {
+          const nowInChile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+          const nowMinutes = nowInChile.getHours() * 60 + nowInChile.getMinutes();
+          if (t <= nowMinutes) continue;
+        }
+
+        // Check date-specific blocks
+        const slotEnd = t + dur;
+        const isBlocked = dateBlocks.some((b) => {
+          if (!b.start_time || !b.end_time) return false;
+          const bStart = timeToMinutes(b.start_time);
+          const bEnd = timeToMinutes(b.end_time);
+          return t < bEnd && slotEnd > bStart;
+        });
+        if (isBlocked) continue;
+
+        // Check existing bookings
+        const isBooked = booked.some((b) => {
+          const bStart = timeToMinutes(b.appointment_time);
+          const bEnd = bStart + (b.duration_min || 30);
+          return t < bEnd && slotEnd > bStart;
+        });
+        if (isBooked) continue;
+
+        daySlots.push({
+          date: dateStr,
+          time: slotTime,
+          dayLabel: DAY_NAMES[dayOfWeek],
+        });
+      }
+    }
+
+    return daySlots;
+  }
+
   function getAvailableSlots(fromDate, count = 6, slotDuration = 30) {
     const slots = [];
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
     const maxDays = 14;
 
     const start = new Date(fromDate + 'T00:00:00');
-    const now = new Date();
 
     for (let d = 0; d < maxDays && slots.length < count; d++) {
       const current = new Date(start);
@@ -738,63 +801,7 @@ function createDatabase(config) {
       const dateStr = current.toISOString().split('T')[0];
       const dayOfWeek = current.getDay(); // 0=Sun
 
-      // Get schedule blocks for this day of week
-      const scheduleBlocks = getScheduleForDayStmt.all(dayOfWeek);
-      if (scheduleBlocks.length === 0) continue;
-
-      // Get date-specific blocks
-      const dateBlocks = getDateBlocksByDateStmt.all(dateStr);
-      const isFullDayBlocked = dateBlocks.some((b) => !b.start_time && !b.end_time);
-      if (isFullDayBlocked) continue;
-
-      // Get already booked slots
-      const booked = getBookedSlotsForDateStmt.all(dateStr);
-
-      // Collect ALL available slots for this day across all blocks
-      const daySlots = [];
-
-      for (const block of scheduleBlocks) {
-        const blockStart = timeToMinutes(block.start_time);
-        const blockEnd = timeToMinutes(block.end_time);
-        const dur = slotDuration || block.slot_duration_min || 30;
-
-        for (let t = blockStart; t + dur <= blockEnd; t += dur) {
-          const slotTime = minutesToTime(t);
-
-          // Skip past slots for today
-          const nowChile = todayInChile();
-          if (dateStr === nowChile) {
-            const nowInChile = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
-            const nowMinutes = nowInChile.getHours() * 60 + nowInChile.getMinutes();
-            if (t <= nowMinutes) continue;
-          }
-
-          // Check date-specific blocks
-          const slotEnd = t + dur;
-          const isBlocked = dateBlocks.some((b) => {
-            if (!b.start_time || !b.end_time) return false;
-            const bStart = timeToMinutes(b.start_time);
-            const bEnd = timeToMinutes(b.end_time);
-            return t < bEnd && slotEnd > bStart;
-          });
-          if (isBlocked) continue;
-
-          // Check existing bookings
-          const isBooked = booked.some((b) => {
-            const bStart = timeToMinutes(b.appointment_time);
-            const bEnd = bStart + (b.duration_min || 30);
-            return t < bEnd && slotEnd > bStart;
-          });
-          if (isBooked) continue;
-
-          daySlots.push({
-            date: dateStr,
-            time: slotTime,
-            dayLabel: dayNames[dayOfWeek],
-          });
-        }
-      }
-
+      const daySlots = computeDaySlots(dateStr, dayOfWeek, slotDuration);
       if (daySlots.length === 0) continue;
 
       // Distribute evenly across the day's available slots
@@ -811,6 +818,39 @@ function createDatabase(config) {
     }
 
     return slots;
+  }
+
+  // Returns up to `maxDaysToShow` upcoming days that have at least one free slot.
+  // Each entry: { date, dayLabel, slotCount }.
+  function getAvailableDays(fromDate, maxDaysToShow = 9, slotDuration = 30, lookaheadDays = 14) {
+    const days = [];
+    const start = new Date(fromDate + 'T00:00:00');
+
+    for (let d = 0; d < lookaheadDays && days.length < maxDaysToShow; d++) {
+      const current = new Date(start);
+      current.setDate(current.getDate() + d);
+
+      const dateStr = current.toISOString().split('T')[0];
+      const dayOfWeek = current.getDay();
+
+      const daySlots = computeDaySlots(dateStr, dayOfWeek, slotDuration);
+      if (daySlots.length === 0) continue;
+
+      days.push({
+        date: dateStr,
+        dayLabel: DAY_NAMES[dayOfWeek],
+        slotCount: daySlots.length,
+      });
+    }
+
+    return days;
+  }
+
+  // Returns all available slots for a single specific date: [{ date, time, dayLabel }].
+  function getSlotsForDate(dateStr, slotDuration = 30) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = date.getDay();
+    return computeDaySlots(dateStr, dayOfWeek, slotDuration);
   }
 
   // --- Search patients ---
@@ -975,7 +1015,7 @@ function createDatabase(config) {
     createAppointment, getAppointmentById, getAppointmentsByDate,
     getAppointmentsByDateRange, updateAppointment, rescheduleAppointment,
     getTodayAppointments, getUpcomingAppointments,
-    getAvailableSlots, getScheduledAppointmentsByPhone,
+    getAvailableSlots, getAvailableDays, getSlotsForDate, getScheduledAppointmentsByPhone,
     getAppointmentsNeedingReminder, markReminderSent,
     // Conversation memory
     appendConversationTurn, getRecentConversationTurns,
