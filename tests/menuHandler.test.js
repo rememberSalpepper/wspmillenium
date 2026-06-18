@@ -46,14 +46,26 @@ describe('menuHandler', () => {
     expect(patientFlowStore.getState(PHONE)).toBe(FLOW_STATES.CONSULTATION);
   });
 
-  test('option 2 reports appointment status', () => {
+  test('option 2 with no scheduled appointment says so (ignores consultation status)', () => {
     const patient = database.getPatientByPhone(PHONE);
+    // A stale consultation marked 'confirmed' must NOT make option 2 lie.
     database.createConsultation({
       phone: PHONE, patientId: patient.id, sintomas: 'tos',
       appointmentStatus: 'confirmed',
     });
     const reply = menuHandler.handleMessage({ phone: PHONE, prompt: '2' });
-    expect(reply.body).toContain('confirmada');
+    expect(reply.body).toContain('No tienes citas agendadas');
+  });
+
+  test('option 2 with a scheduled appointment shows its date and time', () => {
+    const patient = database.getPatientByPhone(PHONE);
+    database.createAppointment({
+      patientId: patient.id, phone: PHONE,
+      date: '2026-12-15', time: '11:00', duration: 30,
+    });
+    const reply = menuHandler.handleMessage({ phone: PHONE, prompt: '2' });
+    expect(reply.body).toContain('próxima cita');
+    expect(reply.body).toContain('11:00');
   });
 
   test('option 3 with no appointments informs the user', () => {
@@ -69,7 +81,7 @@ describe('menuHandler', () => {
     });
 
     const reply = menuHandler.handleMessage({ phone: PHONE, prompt: '3' });
-    expect(reply.body).toContain('Su próxima cita');
+    expect(reply.body).toContain('próxima cita');
     expect(reply.body).toContain('11:00');
     expect(reply.interactive.type).toBe('buttons');
     expect(patientFlowStore.getState(PHONE)).toBe(FLOW_STATES.MANAGING_APPOINTMENT);
@@ -84,7 +96,7 @@ describe('menuHandler', () => {
 
   test('unrecognized input shows the menu with buttons', () => {
     const reply = menuHandler.handleMessage({ phone: PHONE, prompt: 'hola' });
-    expect(reply.body).toContain('En qué puedo ayudarle');
+    expect(reply.body).toContain('Elige una opción');
     expect(reply.interactive.buttons).toHaveLength(3);
   });
 });

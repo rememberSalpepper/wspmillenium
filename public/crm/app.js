@@ -30,7 +30,10 @@
       if (!res.ok) {
         return res.text().then(function (text) {
           console.error('API error', method, path, res.status, text);
-          throw new Error('API error: ' + res.status);
+          var err = new Error('API error: ' + res.status);
+          err.status = res.status;
+          try { err.body = JSON.parse(text); } catch (_) { err.body = null; }
+          throw err;
         });
       }
       return res.json();
@@ -974,7 +977,13 @@
         hideModal();
         toast('Cita reagendada. Paciente notificado.', 'success');
         renderAgenda();
-      }).catch(function () {
+      }).catch(function (err) {
+        if (err && err.status === 409) {
+          // Slot was taken meanwhile; keep the modal open so the doctor can pick another.
+          var msg = (err.body && err.body.message) || 'Ese horario ya está ocupado por otra cita.';
+          toast(msg, 'error');
+          return;
+        }
         hideModal();
         toast('Error al reagendar', 'error');
       });
