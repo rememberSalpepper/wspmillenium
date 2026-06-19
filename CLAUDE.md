@@ -87,7 +87,9 @@ Bot behavior is controlled entirely via environment variables — no code change
 
 | Variable | Purpose |
 |---|---|
-| `BOT_WELCOME_MESSAGE` | Override initial greeting |
+| `BOT_WELCOME_MESSAGE` | Override initial greeting for new users (asks for all form data in one message) |
+| `BOT_RETURNING_MESSAGE` | Greeting for returning patients; `{nombre}` is replaced with the patient's first name. The menu is appended automatically |
+| `RETURNING_SESSION_GAP_MS` | Inactivity gap (ms) after which a completed patient is greeted back by name + menu (default 6h) |
 | `BOT_HUMAN_HANDOFF_MESSAGE` | Message sent when escalating to human |
 | `BOT_EMERGENCY_MESSAGE` | Message sent on emergency detection |
 | `BOT_PRICE_TABLE` | Pricing info injected into system prompt (use `\n` for line breaks) |

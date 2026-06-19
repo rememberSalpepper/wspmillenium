@@ -1,18 +1,28 @@
 const DEFAULT_WELCOME_MESSAGE = [
-  'Hola 👋 Bienvenido(a) a Consultas Millenium.',
+  '¡Hola! 👋 Te damos la bienvenida a Consultas Millenium.',
   '',
-  'Soy Catalina, asistente del Dr. Luis Martínez.',
+  'Soy Catalina, la asistente del Dr. Luis Martínez 🩺',
   '',
-  'Para continuar, por favor envíeme los siguientes datos:',
+  'Para empezar necesito tus datos. Escríbelos en UN solo mensaje, cada dato en una línea distinta (presiona Enter entre uno y otro) y en este orden:',
   '',
-  '1. RUT:',
-  '2. Nombre completo:',
-  '3. Correo electrónico:',
-  '4. Teléfono:',
-  '5. Dirección:',
+  '1. RUT',
+  '2. Nombre completo',
+  '3. Correo electrónico',
+  '4. Teléfono',
+  '5. Dirección (con comuna)',
   '',
-  'Puede enviarlos todos en un solo mensaje 😊',
+  'Por ejemplo:',
+  '12.345.678-9',
+  'Juan Pérez González',
+  'juan@correo.cl',
+  '+56912345678',
+  'Av. Siempre Viva 123, Maipú',
 ].join('\n');
+
+// Greeting for a patient who already completed the form and comes back in a new
+// session. {nombre} is replaced with the patient's first name (or removed if
+// unknown). The clinic menu is appended right after by the webhook.
+const DEFAULT_RETURNING_MESSAGE = 'Hola {nombre} 👋 Qué gusto verte de nuevo en Consultas Millenium.';
 
 const DEFAULT_HUMAN_HANDOFF_MESSAGE =
   'Te voy a derivar con una asistente humana para continuar por este medio 🙋‍♀️ Si quieres adelantar el proceso, envíame tu nombre completo y RUT.';
@@ -76,14 +86,15 @@ function buildBotSystemInstruction({ pricingTableText, extraInstruction = '' }) 
     ].join('\n'),
     [
       'REGLAS OPERATIVAS:',
-      '- Para el formulario inicial, pide los datos SIEMPRE en formato de lista vertical, uno por linea, asi:',
-      '  1. RUT:',
-      '  2. Nombre completo:',
-      '  3. Correo electronico:',
-      '  4. Telefono:',
-      '  5. Direccion:',
+      '- Para el formulario inicial, pide los datos SIEMPRE en lista vertical numerada y pide que el usuario escriba cada dato en una linea distinta, en este orden:',
+      '  1. RUT',
+      '  2. Nombre completo',
+      '  3. Correo electronico',
+      '  4. Telefono',
+      '  5. Direccion (con comuna)',
+      '- Indica que escriba un dato por linea (presionando Enter entre uno y otro), no separados por comas ni en un parrafo.',
       '- NUNCA pidas los datos del formulario en un parrafo ni en una sola oracion. Siempre usa el formato de lista numerada hacia abajo.',
-      '- Si faltan datos o vienen mal escritos, solicita solo esos datos, tambien en formato de lista vertical.',
+      '- Si faltan datos o vienen mal escritos, solicita solo esos datos, tambien en lista vertical, uno por linea.',
       '- Si preguntan por precios y no hay tabla configurada, no inventes montos.',
       '- No inventes disponibilidad ni confirmes horas medicas.',
       '- Si el usuario quiere hablar con una persona, deriva de inmediato.',
@@ -226,6 +237,7 @@ function buildMemorySystemSuffix(summary) {
 
 module.exports = {
   DEFAULT_WELCOME_MESSAGE,
+  DEFAULT_RETURNING_MESSAGE,
   DEFAULT_HUMAN_HANDOFF_MESSAGE,
   DEFAULT_EMERGENCY_MESSAGE,
   buildBotSystemInstruction,

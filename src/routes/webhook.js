@@ -3,7 +3,7 @@ const { log } = require('../logger');
 const { getAutomatedReply, limitReplyWords } = require('../botPolicy');
 const { FLOW_STATES, isFormCollectionState } = require('../stores/patientFlowStore');
 const { verifyWebhookSignature } = require('../utils/signature');
-const { normalizeForPatterns, wantsRestart, isResetCommand } = require('../utils/intent');
+const { normalizeForPatterns, isResetCommand } = require('../utils/intent');
 const {
   normalizeDigits,
   previewText,
@@ -14,12 +14,32 @@ const {
 } = require('../utils/text');
 const { buildMemorySystemSuffix } = require('../botPrompt');
 
-const CONFIRM_IDENTITY_MESSAGE = [
-  'Tenemos datos registrados a este número.',
-  '',
-  'Si eres la misma persona, responde "sí" para continuar.',
-  'Si eres otra persona, responde "nuevo" para iniciar desde cero.',
-].join('\n');
+// First name (capitalized) from a stored full name, or '' if unavailable.
+function getFirstName(fullName) {
+  const first = String(fullName || '')
+    .trim()
+    .split(/\s+/)[0] || '';
+  if (!first) return '';
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
+// Render the returning-patient greeting, substituting {nombre} and tidying the
+// spacing when the name is unknown.
+function renderReturningGreeting(template, firstName) {
+  return String(template || '')
+    .replace('{nombre}', firstName)
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// True when the last stored turn is older than the gap (or there is none),
+// meaning the patient is opening a fresh session and should be welcomed back.
+function isReturningGap(lastTurnAt, gapMs) {
+  if (!lastTurnAt) return true;
+  const parsed = Date.parse(String(lastTurnAt).replace(' ', 'T') + 'Z');
+  if (!Number.isFinite(parsed)) return true;
+  return Date.now() - parsed > gapMs;
+}
 
 const FALLBACK_QUOTA_MESSAGE =
   'Se agotó la cuota de la cuenta API de IA. Estamos en pruebas. Intenta nuevamente en un rato.';
@@ -454,6 +474,16 @@ function createWebhookRouter({
     const flowState = patientFlowStore.getState(from);
     const isFirstInteraction = !conversationStore.hasTurns(from) && !patient;
 
+    // A known patient (form completed, flow done) who comes back after a period
+    // of inactivity is treated as a returning session: we greet them by name and
+    // show the menu, no identity confirmation. Computed before we append the
+    // current turn so the inactivity gap is measured against their last visit.
+    const isReturningSession =
+      Boolean(patient?.form_completed) &&
+      flowState === FLOW_STATES.COMPLETED &&
+      !isFirstInteraction &&
+      isReturningGap(database.getLastConversationTurnAt(from), config.RETURNING_SESSION_GAP_MS);
+
     log('info', 'batch.accepted', {
       from,
       msgId,
@@ -500,101 +530,8 @@ function createWebhookRouter({
       return;
     }
 
-    const isNewSession = conversationStore.turnCount(from) <= 1;
-    const hasStalePatient = patient?.form_completed && isNewSession && !isFirstInteraction;
-
-    if (hasStalePatient && flowState === FLOW_STATES.COMPLETED) {
-      const wantsNew = /\bnuevo\b|\bnueva\b|\botr[oa]\b/.test(normalizeForPatterns(prompt));
-
-      if (wantsNew || wantsRestart(prompt)) {
-        log('info', 'flow.stale_patient_reset', { from, oldPatientId: patient.id });
-
-        database.resetPatient(from);
-        patientFlowStore.clearState(from);
-        conversationStore.clear(from);
-
-        await deliverReply({
-          from,
-          msgId,
-          body: config.BOT_WELCOME_MESSAGE,
-          conversationStore,
-          whatsappService,
-          successEvent: 'outbound.stale_reset_welcome_sent',
-          errorEvent: 'whatsapp.stale_reset_welcome_send_error',
-        });
-
-        return;
-      }
-
-      patientFlowStore.setState(from, FLOW_STATES.CONFIRMING_IDENTITY);
-
-      await deliverReply({
-        from,
-        msgId,
-        body: CONFIRM_IDENTITY_MESSAGE,
-        conversationStore,
-        whatsappService,
-        successEvent: 'outbound.confirm_identity_sent',
-        errorEvent: 'whatsapp.confirm_identity_send_error',
-      });
-
-      return;
-    }
-
-    // Handle response to identity confirmation
-    if (flowState === FLOW_STATES.CONFIRMING_IDENTITY) {
-      const normalized = normalizeForPatterns(prompt);
-      const isSamePatient = /\bsi\b|\bsí\b|\bsi soy\b|\bsoy yo\b|\bmism[oa]\b/.test(normalized);
-      const isNewPatient = /\bnuevo\b|\bnueva\b|\botr[oa]\b/.test(normalized);
-
-      if (isSamePatient) {
-        log('info', 'flow.identity_confirmed_same', { from });
-        conversationStore.clear(from);
-        patientFlowStore.setState(from, FLOW_STATES.CONSULTATION);
-
-        await deliverReply({
-          from,
-          msgId,
-          body: 'Bienvenido(a) de vuelta 👋 Cuénteme brevemente sus síntomas y el motivo de su consulta.',
-          conversationStore,
-          whatsappService,
-          successEvent: 'outbound.returning_patient_welcome_sent',
-          errorEvent: 'whatsapp.returning_patient_welcome_error',
-        });
-        return;
-      }
-
-      if (isNewPatient || wantsRestart(prompt)) {
-        log('info', 'flow.identity_confirmed_new', { from });
-        database.resetPatient(from);
-        patientFlowStore.clearState(from);
-        conversationStore.clear(from);
-
-        await deliverReply({
-          from,
-          msgId,
-          body: config.BOT_WELCOME_MESSAGE,
-          conversationStore,
-          whatsappService,
-          successEvent: 'outbound.new_patient_reset_sent',
-          errorEvent: 'whatsapp.new_patient_reset_error',
-        });
-        return;
-      }
-
-      // Unrecognized response, re-ask
-      await deliverReply({
-        from,
-        msgId,
-        body: 'Responda "sí" si es la misma persona, o "nuevo" para iniciar desde cero.',
-        conversationStore,
-        whatsappService,
-        successEvent: 'outbound.confirm_identity_resent',
-        errorEvent: 'whatsapp.confirm_identity_resend_error',
-      });
-      return;
-    }
-
+    // Emergency / human-handoff detection runs before the returning greeting so
+    // an urgent message from a known patient is never masked by the menu.
     const automatedReply = getAutomatedReply({
       prompt,
       isFirstInteraction,
@@ -634,6 +571,54 @@ function createWebhookRouter({
 
         return;
       }
+    }
+
+    // Returning patient: greet them by name and show the menu directly (no
+    // identity confirmation). If they explicitly ask to start over, reset first.
+    if (isReturningSession) {
+      const wantsNew = /\bnuevo\b|\bnueva\b|\botr[oa] persona\b/.test(normalizeForPatterns(prompt));
+
+      if (wantsNew) {
+        log('info', 'flow.returning_patient_reset', { from, oldPatientId: patient.id });
+
+        database.resetPatient(from);
+        patientFlowStore.clearState(from);
+        conversationStore.clear(from);
+
+        await deliverReply({
+          from,
+          msgId,
+          body: config.BOT_WELCOME_MESSAGE,
+          conversationStore,
+          whatsappService,
+          successEvent: 'outbound.returning_reset_welcome_sent',
+          errorEvent: 'whatsapp.returning_reset_welcome_send_error',
+        });
+
+        return;
+      }
+
+      log('info', 'flow.returning_patient_welcome', { from });
+
+      const greeting = renderReturningGreeting(
+        config.BOT_RETURNING_MESSAGE,
+        getFirstName(patient?.nombre)
+      );
+      const menuReply = menuHandler.getMenuReply();
+
+      await deliverReply({
+        from,
+        msgId,
+        body: `${greeting}\n\n${menuReply.body}`,
+        conversationStore,
+        whatsappService,
+        successEvent: 'outbound.returning_welcome_sent',
+        errorEvent: 'whatsapp.returning_welcome_error',
+        interactiveEnabled: config.WHATSAPP_INTERACTIVE,
+        interactive: menuReply.interactive,
+      });
+
+      return;
     }
 
     if (isFormCollectionState(flowState)) {

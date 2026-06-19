@@ -394,6 +394,9 @@ function createDatabase(config) {
   const getRecentConversationTurnsStmt = db.prepare(
     'SELECT role, text, created_at FROM conversation_turns WHERE phone = ? ORDER BY id DESC LIMIT ?'
   );
+  const getLastConversationTurnAtStmt = db.prepare(
+    'SELECT created_at FROM conversation_turns WHERE phone = ? ORDER BY id DESC LIMIT 1'
+  );
   const deleteConversationTurnsByPhoneStmt = db.prepare(
     'DELETE FROM conversation_turns WHERE phone = ?'
   );
@@ -913,6 +916,15 @@ function createDatabase(config) {
     return getRecentConversationTurnsStmt.all(cleanPhone, safeLimit).reverse();
   }
 
+  // Timestamp (SQLite UTC string) of the most recent stored turn for this phone,
+  // or null if there are none. Used to detect a returning patient session.
+  function getLastConversationTurnAt(phone) {
+    const cleanPhone = String(phone || '').trim();
+    if (!cleanPhone) return null;
+    const row = getLastConversationTurnAtStmt.get(cleanPhone);
+    return row?.created_at || null;
+  }
+
   function clearConversationTurns(phone) {
     const cleanPhone = String(phone || '').trim();
     if (!cleanPhone) return;
@@ -1041,7 +1053,7 @@ function createDatabase(config) {
     getAvailableSlots, getAvailableDays, getSlotsForDate, getScheduledAppointmentsByPhone,
     getAppointmentsNeedingReminder, markReminderSent,
     // Conversation memory
-    appendConversationTurn, getRecentConversationTurns,
+    appendConversationTurn, getRecentConversationTurns, getLastConversationTurnAt,
     clearConversationTurns, pruneConversationTurns,
     // Long-term memory
     getPatientMemory, upsertPatientMemory, clearPatientMemory,

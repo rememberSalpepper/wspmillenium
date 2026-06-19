@@ -48,6 +48,17 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
     ? '¿En qué puedo ayudarte? Elige una opción 👇'
     : MENU_MESSAGE;
 
+  // The default main-menu reply descriptor. Reused by the webhook to append the
+  // menu after the returning-patient greeting.
+  function getMenuReply() {
+    return {
+      body: menuBody,
+      interactive: menuButtons,
+      successEvent: 'outbound.completed_menu_sent',
+      errorEvent: 'whatsapp.completed_menu_error',
+    };
+  }
+
   function handleMessage({ phone, prompt }) {
     const trimmed = String(prompt || '').trim();
 
@@ -162,15 +173,10 @@ function createMenuHandler({ database, patientFlowStore, conversationStore, conf
     }
 
     // Any other message → show menu.
-    return {
-      body: menuBody,
-      interactive: menuButtons,
-      successEvent: 'outbound.completed_menu_sent',
-      errorEvent: 'whatsapp.completed_menu_error',
-    };
+    return getMenuReply();
   }
 
-  return { handleMessage };
+  return { handleMessage, getMenuReply };
 }
 
 module.exports = { createMenuHandler };

@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const {
   DEFAULT_WELCOME_MESSAGE,
+  DEFAULT_RETURNING_MESSAGE,
   DEFAULT_HUMAN_HANDOFF_MESSAGE,
   DEFAULT_EMERGENCY_MESSAGE,
   buildBotSystemInstruction,
@@ -55,6 +56,9 @@ const botInstructionOverride = toMultilineText(process.env.BOT_SYSTEM_INSTRUCTIO
 const botWelcomeMessage =
   toMultilineText(process.env.BOT_WELCOME_MESSAGE, DEFAULT_WELCOME_MESSAGE) ||
   DEFAULT_WELCOME_MESSAGE;
+const botReturningMessage =
+  toMultilineText(process.env.BOT_RETURNING_MESSAGE, DEFAULT_RETURNING_MESSAGE) ||
+  DEFAULT_RETURNING_MESSAGE;
 const botHumanHandoffMessage =
   toMultilineText(process.env.BOT_HUMAN_HANDOFF_MESSAGE, DEFAULT_HUMAN_HANDOFF_MESSAGE) ||
   DEFAULT_HUMAN_HANDOFF_MESSAGE;
@@ -83,6 +87,7 @@ const config = {
   BOT_SYSTEM_INSTRUCTION: botSystemInstruction,
   BOT_PRICE_TABLE: botPriceTable,
   BOT_WELCOME_MESSAGE: botWelcomeMessage,
+  BOT_RETURNING_MESSAGE: botReturningMessage,
   BOT_HUMAN_HANDOFF_MESSAGE: botHumanHandoffMessage,
   BOT_EMERGENCY_MESSAGE: botEmergencyMessage,
   BOT_REMINDER_MESSAGE: botReminderMessage,
@@ -92,6 +97,12 @@ const config = {
   GEMINI_TIMEOUT_MS: toNumber(process.env.GEMINI_TIMEOUT_MS, 20000),
   MESSAGE_MAX_AGE_SECONDS: toNumber(process.env.MESSAGE_MAX_AGE_SECONDS, 300),
   MESSAGE_BUFFER_MS: toNumber(process.env.MESSAGE_BUFFER_MS, 2500),
+  // Gap of inactivity (ms) after which a known patient is treated as a returning
+  // session and greeted by name with the menu. Default 6h.
+  RETURNING_SESSION_GAP_MS: toNumber(
+    process.env.RETURNING_SESSION_GAP_MS,
+    6 * 60 * 60 * 1000
+  ),
 
   DEDUP_TTL_MS: toNumber(process.env.DEDUP_TTL_MS, 6 * 60 * 60 * 1000),
   CONVERSATION_TTL_MS: toNumber(process.env.CONVERSATION_TTL_MS, 24 * 60 * 60 * 1000),

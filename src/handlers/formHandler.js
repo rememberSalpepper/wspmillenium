@@ -15,35 +15,43 @@ const {
 } = require('../validators');
 const { log } = require('../logger');
 
+// Canonical field order. This same order is shown to the user (welcome message,
+// re-ask templates) AND used to map a line-per-value message positionally, so
+// they MUST stay in sync: line 1 → RUT, line 2 → Nombre, etc.
 const FORM_FIELDS = [
-  {
-    key: 'nombre',
-    state: FLOW_STATES.COLLECTING_NOMBRE,
-    label: 'Nombre completo',
-    validate: validateFullName,
-  },
   {
     key: 'rut',
     state: FLOW_STATES.COLLECTING_RUT,
     label: 'RUT',
+    example: '12.345.678-9',
     validate: validateRut,
+  },
+  {
+    key: 'nombre',
+    state: FLOW_STATES.COLLECTING_NOMBRE,
+    label: 'Nombre completo',
+    example: 'Juan Pérez González',
+    validate: validateFullName,
+  },
+  {
+    key: 'correo',
+    state: FLOW_STATES.COLLECTING_CORREO,
+    label: 'Correo electrónico',
+    example: 'juan@correo.cl',
+    validate: validateEmail,
   },
   {
     key: 'telefono',
     state: FLOW_STATES.COLLECTING_TELEFONO,
     label: 'Teléfono',
+    example: '+56912345678',
     validate: validatePhone,
-  },
-  {
-    key: 'correo',
-    state: FLOW_STATES.COLLECTING_CORREO,
-    label: 'Correo',
-    validate: validateEmail,
   },
   {
     key: 'direccion',
     state: FLOW_STATES.COLLECTING_DIRECCION,
-    label: 'Dirección',
+    label: 'Dirección (con comuna)',
+    example: 'Av. Siempre Viva 123, Maipú',
     validate: validateAddress,
   },
 ];
@@ -74,6 +82,7 @@ const LABEL_ALIASES = {
   nombre: 'nombre',
   'nombre completo': 'nombre',
   correo: 'correo',
+  'correo electronico': 'correo',
   email: 'correo',
   mail: 'correo',
   telefono: 'telefono',
@@ -128,13 +137,25 @@ function buildFormSummary(patient) {
 
 function buildFormTemplate(fields, intro) {
   const useNumbering = fields.length > 1;
-  return [
-    intro,
-    '',
-    ...fields.map((field, index) =>
-      useNumbering ? `${index + 1}. ${field.label}:` : `${field.label}:`
-    ),
-  ].join('\n');
+  const lines = fields.map((field, index) =>
+    useNumbering ? `${index + 1}. ${field.label}` : field.label
+  );
+
+  // When several fields are requested, remind the user to put each one on its
+  // own line and show a filled-in example (matching exactly the requested
+  // fields and order) so they don't mix them up.
+  if (useNumbering) {
+    return [
+      intro,
+      '',
+      ...lines,
+      '',
+      'Por ejemplo:',
+      ...fields.map((field) => field.example),
+    ].join('\n');
+  }
+
+  return [intro, '', ...lines].join('\n');
 }
 
 function buildNextQuestion(state) {
@@ -142,13 +163,13 @@ function buildNextQuestion(state) {
   const field = FORM_FIELD_CONFIG[fieldKey];
 
   if (!field) {
-    return buildFormTemplate(FORM_FIELDS, 'Envíeme sus datos en un solo mensaje con este formato:');
+    return buildFormTemplate(
+      FORM_FIELDS,
+      'Envíame tus datos en un solo mensaje, cada uno en una línea distinta (presiona Enter entre uno y otro) y en este orden:'
+    );
   }
 
-  return buildFormTemplate(
-    [field],
-    'Envíeme nuevamente este dato:'
-  );
+  return buildFormTemplate([field], 'Envíame nuevamente este dato:');
 }
 
 function detectCorrectionField(prompt) {
@@ -208,6 +229,42 @@ function extractLabeledFields(prompt) {
   return extracted;
 }
 
+// Maps a line-per-value message onto the still-missing fields, in order.
+// `orderedMissingKeys` is the list of pending field keys in canonical order, so
+// line 1 → first pending field, line 2 → second, etc. Only activates when the
+// message clearly uses the format: multiple lines, or a single line answering a
+// single pending field (so a one-field re-ask doesn't need an AI round-trip).
+function extractPositionalFields(prompt, orderedMissingKeys) {
+  const extracted = {
+    rut: null,
+    nombre: null,
+    correo: null,
+    telefono: null,
+    direccion: null,
+  };
+
+  const keys = Array.isArray(orderedMissingKeys) ? orderedMissingKeys : [];
+  if (keys.length === 0) return extracted;
+
+  const lines = String(prompt || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return extracted;
+
+  const isMultiLine = lines.length >= 2;
+  const isSinglePending = keys.length === 1;
+  if (!isMultiLine && !isSinglePending) return extracted;
+
+  keys.forEach((key, index) => {
+    if (index < lines.length && lines[index]) {
+      extracted[key] = lines[index];
+    }
+  });
+
+  return extracted;
+}
+
 function countExtractedFields(extracted) {
   return FORM_FIELDS.filter((field) => {
     const value = extracted?.[field.key];
@@ -226,31 +283,49 @@ function buildPendingFieldsMessage({ patient, invalidKeys = [] }) {
     (field) => invalidFieldSet.has(field.key) || missingFields.some((missing) => missing.key === field.key)
   );
 
-  let intro = 'Envíeme estos datos en un solo mensaje:';
+  const perLine =
+    neededFields.length > 1 ? ' Escribe cada dato en una línea distinta, en este orden:' : '';
+
+  let intro = `Envíame estos datos.${perLine}`;
   if (invalidKeys.length > 0 && neededFields.length === invalidKeys.length) {
-    intro = 'Corrija estos datos:';
+    intro = `Hay datos que debo corregir.${perLine}`;
   } else if (invalidKeys.length > 0) {
-    intro = 'Faltan o hay que corregir estos datos:';
+    intro = `Faltan o debo corregir algunos datos.${perLine}`;
   } else if (neededFields.length !== FORM_FIELDS.length) {
-    intro = 'Faltan estos datos:';
+    intro = `Me faltan estos datos.${perLine}`;
   }
 
   return buildFormTemplate(neededFields, intro);
 }
 
 function createFormHandler({ database, patientFlowStore, geminiService }) {
-  async function extractFormData(prompt) {
+  // Structured (deterministic) extraction: explicit "Label: value" lines first,
+  // then a line-per-value message mapped onto the pending fields in order.
+  function extractStructuredFields(prompt, orderedMissingKeys) {
     const labeledFields = extractLabeledFields(prompt);
-    const labeledCount = countExtractedFields(labeledFields);
-
-    if (labeledCount > 0) {
+    if (countExtractedFields(labeledFields) > 0) {
       log('info', 'form.extraction_labeled', {
-        fieldsFound: labeledCount,
+        fieldsFound: countExtractedFields(labeledFields),
         keys: Object.keys(labeledFields).filter((k) => labeledFields[k]),
       });
-      return labeledFields;
+      return { fields: labeledFields, source: 'labeled' };
     }
 
+    const positionalFields = extractPositionalFields(prompt, orderedMissingKeys);
+    if (countExtractedFields(positionalFields) > 0) {
+      log('info', 'form.extraction_positional', {
+        fieldsFound: countExtractedFields(positionalFields),
+        keys: Object.keys(positionalFields).filter((k) => positionalFields[k]),
+      });
+      return { fields: positionalFields, source: 'positional' };
+    }
+
+    return { fields: {}, source: 'none' };
+  }
+
+  // Free-text fallback via Gemini for messages that don't follow the structured
+  // formats (e.g. "hola, soy Juan, mi rut es 12.345.678-9 ...").
+  async function extractWithGemini(prompt) {
     const rawResponse = await geminiService.generateText({
       prompt: buildFormExtractionPrompt(prompt),
       systemInstruction: buildFormExtractionInstruction(),
@@ -275,8 +350,8 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
     return parsed;
   }
 
-  async function handleFieldCollection({ phone, prompt, state }) {
-    const extractedFields = await extractFormData(prompt);
+  // Validates each extracted field and persists the valid ones.
+  function saveValidFields(phone, extractedFields) {
     const savedKeys = [];
     const invalidKeys = [];
 
@@ -301,9 +376,34 @@ function createFormHandler({ database, patientFlowStore, geminiService }) {
       savedKeys.push(field.key);
     }
 
+    return { savedKeys, invalidKeys };
+  }
+
+  async function handleFieldCollection({ phone, prompt, state }) {
+    // Pending fields in canonical order drive the positional mapping.
+    const existingPatient = database.getPatientByPhone(phone);
+    const orderedMissingKeys = FORM_FIELDS.map((field) => field.key).filter(
+      (key) => !existingPatient?.[key]
+    );
+
+    let { fields: extractedFields, source } = extractStructuredFields(prompt, orderedMissingKeys);
+    let { savedKeys, invalidKeys } = saveValidFields(phone, extractedFields);
+
+    // If nothing was saved, fall back to the AI extractor (handles free text and
+    // misaligned line input that strict structured parsing rejected).
+    if (savedKeys.length === 0 && source !== 'gemini') {
+      const geminiFields = await extractWithGemini(prompt);
+      if (countExtractedFields(geminiFields) > 0) {
+        extractedFields = geminiFields;
+        source = 'gemini';
+        ({ savedKeys, invalidKeys } = saveValidFields(phone, geminiFields));
+      }
+    }
+
     log('info', 'form.field_collection_result', {
       phone,
       state,
+      source,
       savedKeys,
       invalidKeys,
       extractedKeys: Object.keys(extractedFields || {}).filter((k) => extractedFields[k]),
